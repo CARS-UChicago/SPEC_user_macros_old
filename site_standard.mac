@@ -268,6 +268,10 @@ def setup_med '{
 def med_on ' 
    IS_EPICS_MED_COUNT = TRUE 
 
+   if (MED_PV == ""){
+       eprint "MED_PV unset, run setup_med first!"
+       exit
+   }
    if ($# < 1){
       MED_WRITE_FILES = getval("Enter 1 to write med files, 0 for off",MED_WRITE_FILES)
       if (MED_WRITE_FILES){
@@ -277,6 +281,8 @@ def med_on '
    } else {
       MED_WRITE_FILES = $1
    }
+   med_cw_desc_pv = sprintf("%s%s",MED_PV,"ClientWait.DESC")
+   epics_put(med_cw_desc_pv,"spec_default.dat")
    print "MED_ON" 
 '
 def med_off ' 
@@ -340,7 +346,7 @@ def epics_med_count2 '{
 
      # hit the triggers and wait for done
      epics_put(med_cnt_pv,1)
-     while( epics_get(med_acq_pv) == 0) sleep(0.1);
+     while( epics_get(med_acq_pv,"short") == 0) sleep(0.1);
      epics_put(sc_cnt_pv,1)
 
      # wait for scaler and med to finish
@@ -354,7 +360,7 @@ def epics_med_count2 '{
              sc_done = TRUE;
             # p "scaler done"
         }
-        if (epics_get(med_acq_pv) == 0){
+        if (epics_get(med_acq_pv,"short") == 0){
             med_done = TRUE;
            # p "med done"
         }
@@ -475,7 +481,7 @@ def epics_med_count '{
      # hit the triggers
      xx_cnt = 0
      epics_put(med_cnt_pv,1)
-     while( epics_get(med_acq_pv) == 0){
+     while( epics_get(med_acq_pv,"short") == 0){
          sleep(0.05);
          xx_cnt = xx_cnt + 1;         
          if (xx_cnt > 20){
@@ -496,7 +502,7 @@ def epics_med_count '{
              sc_done = TRUE;
              #p "scaler done"
         }
-        if (epics_get(med_acq_pv) == 0){
+        if (epics_get(med_acq_pv,"short") == 0){
             med_done = TRUE;
             #p "med done"
         }
