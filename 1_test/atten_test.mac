@@ -1,0 +1,199 @@
+##########################################################################################
+##########################################################################################
+#  Attenuators                                                                           #
+##########################################################################################
+##########################################################################################
+# ToDO
+# - make a macro to set these globals and determine atten factors!!!
+# - make more complete, ie based on atten factors calc the best combo of filters.....
+##########################################################################################
+# globals for attenuator macros macro
+##########################################################################################
+array  ATTEN[4]
+       ATTEN = 0;
+global SAT_CNTR_IDX
+       SAT_CNTR_IDX = 2;   # i1
+array atten_idx[16][4]
+array filter_idx[16][3]
+
+def atten_setup '{
+
+# generate array containing all possible combinations of filters
+      atten_idx [][]= 0
+	atten_idx [4, 9:][0] = 1
+	atten_idx [3,6,7,8,12:][1] = 1
+	atten_idx [2,5,7,8,10,11,14,15][2] = 1
+	atten_idx [1,5,6,8,9,11,13,15][3] = 1
+
+
+#assign attenuation factors for the four filters
+local array f[4]	
+	f[0] = getval("enter atten factor for filter 1",7)
+	f[1] = getval("enter atten factor for filter 2",20)
+	f[2] = getval("enter atten factor for filter 3",400)
+	f[3] = getval("enter atten factor for filter 4",170000)
+
+#get I min (when f=1)
+Imin = getval("enter the minimum saturation value for the detector (use f = 1)",50000)
+
+#get a second point to construct the calibration curve
+local array combo[4]
+	combo[0] = getval("enter the usage value for the first filter (must be 0 or 1)",1)
+	combo[1] = getval("enter the usage value for the second filter (must be 0 or 1)",1)
+	combo[2] = getval("enter the usage value for the third filter (must be 0 or 1)",0)
+	combo[3] = getval("enter the usage value for the fourth filter (must be 0 or 1)",0)
+
+#compute the attenuation factor for this combination
+local array g[4]
+for (y = 0; y < 4; y++) {
+	atten = combo[y] * f[y]
+		if (atten != 0) {
+		    g[y] = atten 
+		} else {
+                g[y] = 1
+            }
+}
+calib_atten = g[0] * g[1] * g[2] * g[3]
+
+#get the saturation count for this calibration attenuation combination
+I1 = getval("enter the saturation value for this combination of filters",1e5)
+
+#find the calibration curve
+slope = (calib_atten - 1) / (I1 - Imin)
+intercept = 1 - (slope * Imin)
+
+
+
+for (j=0;j < 16; j++) {
+	#store index value in the array
+	filter_idx[j][0] = j
+	#compute net attenuation factor for the jth attenuator combination
+	local array test[4]
+	for (i=0; i <4; i++) {
+		atten = atten_idx[j][i] * f[i]
+		if (atten != 0) {
+		    test[i] = atten 
+		} else {
+                test[i] = 1
+            }
+	}
+	#store net attenuator factor in array
+	filter_idx[j][1] = test[0] * test[1] * test[2] * test[3]
+	#store saturation counts in the array
+	filter_idx[j][2] = (filter_idx[j][1] - intercept) / slope 
+		
+}
+
+#sort the filter_idx array in order of attenuation facors
+local array x[16][3]
+	x[][1] = array_op("sort", filter_idx[][1])
+	for (k=0; k<16; k++) {
+		array z[15][1]
+			z = fabs(filter_idx[][1] - x[k][1])
+		n = array_op("i_at_min", z)
+		x[k][0] = n
+		x[k][2] = filter_idx[n][2]
+	}
+filter_idx = x
+
+
+}'
+	
+##########################################################################################
+# Check saturation
+# note if do_set = 1 this will force the
+# update of the attenuators
+# otherwise this macro will only call add_atten if
+# it thinks it needs to.
+#
+def CHECK_SAT_TEST(do_set) '{
+
+   # note NPTS is set in the _ascan macro
+   local num_rows, j
+   num_rows = NPTS;
+
+   local array sat_mon_array[num_rows][1];
+   local sat_cnts, sat;
+   local array atten_level[4];
+               atten_level = 0;
+
+   ## look at cps in i1
+   #sat_mon_array[][0] = SCAN_D[0:num_rows-1][SAT_CNTR_IDX+1]/SCAN_D[0:num_rows-1][sec+1];
+   #sat_cnts = array_op("max", sat_mon_array[][0]);
+   # p "Sat cnt = " sat_cnts
+   sat_cnts = 1e6;
+
+   z = array_op("i_>=_value", filter_idx[][2],sat_cnts)
+ p  blah = filter_idx[z[0]][0]
+
+
+ atten_level[0] = atten_idx[blah][0];
+ atten_level[1] = atten_idx[blah][1];
+ atten_level[2] = atten_idx[blah][2];
+ atten_level[3] = atten_idx[blah][3];
+
+ sat = 0;
+ for(j=1;j<4;j++){
+     if (atten_level[j] != ATTEN[j] ){
+         sat = 1;
+     }
+ }
+
+if (sat == 1 || do_set == 1) { 
+  add_atten( atten_level[0], atten_level[1], atten_level[2], atten_level[3] ); 
+  p "Updating Attenuators"
+}
+return(sat);
+
+}'
+
+##########################################################################################
+## add attenuators for detector arm
+def add_atten_test(set1, set2, set3, set4) '{   
+ 
+ if ( set1 == 1  ){
+     epics_put("13IDC:UnidigBo17.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo17.VAL",1)
+ }
+
+ if ( set2 == 1  ){
+     epics_put("13IDC:UnidigBo19.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo19.VAL",1)
+ }
+
+ if ( set3 == 1  ){
+     epics_put("13IDC:UnidigBo21.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo21.VAL",1)
+ }
+
+ if ( set4 == 1  ){
+     epics_put("13IDC:UnidigBo23.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo23.VAL",1)
+ }
+
+
+# test
+#p epics_get("13IDC:UnidigBi17.VAL")
+#p epics_get("13IDC:UnidigBi19.VAL")
+#p epics_get("13IDC:UnidigBi21.VAL")
+#p epics_get("13IDC:UnidigBi23.VAL")
+#p " "
+
+sleep(1);
+
+# check status of attenators
+# note Low = 0 = "attenuator in" in the epics pv
+# but were saying that if ATTEN[i] = 0 the atten is out
+ATTEN = 0;
+if( epics_get("13IDC:UnidigBi16.VAL") == "Low") ATTEN[0]=1;
+if( epics_get("13IDC:UnidigBi18.VAL") == "Low") ATTEN[1]=1;
+if( epics_get("13IDC:UnidigBi20.VAL") == "Low") ATTEN[2]=1;
+if( epics_get("13IDC:UnidigBi22.VAL") == "Low") ATTEN[3]=1;
+
+}'
+############################################################################
+

@@ -1,0 +1,161 @@
+# psic_clean_start macro.
+# similiar to starting spec with:  >>psic -f
+# note this is psic specific!!!!!
+
+
+PRINTER="/dev/null"
+
+################### set psic parameters (Q array)  ##############################
+  # These are recalc when do a calcHKL (or calc(2)).
+	H=0.0			# Q[0], H coord
+	K=0.0			# Q[1], K coord
+	L=0.0			# Q[2], L coord
+	LAMBDA=1.54 	# Q[3], Wavelength (only recalculated if have a mono motor defined)
+	ALPHA=0		# Q[4], Angle between the reference vector and the xz-plane (incidence angle) 
+	BETA=0		# Q[5], Exit angle when the reference vector is the surface normal
+	OMEGA=0		# Q[6], Angle btwn Q and the plane perpendicular to the chi axis
+	TTH=0			# Q[7], Scattering angle
+	PSI=0			# Q[8], Azimuthal angle of the reference vector wrt Q and the scatt-plane
+	TAU=0			# Q[9], Longitudinal angle of the reference vector wrt Q and the scatt-plane
+	QAZ=0			# Q[10], Angle btwn Q and the yz-plane
+	NAZ=0			# Q[11], Angle btwn the reference vector and the yz-plane
+	SIGMA_AZ=0		# Q[12], Angle to specify reference vector, = -flat_chi
+	TAU_AZ=0		# Q[13], Angle to specify reference vector, = -flat_phi
+   
+  # Values for the frozen angles, 
+  # These are only used if g_frz=1, otherwise the current values are used
+	F_ALPHA=0		# Q[14], Frozen value of ALPHA for alpha-fixed mode.
+	F_BETA=0		# Q[15], Frozen value of BETA for beta-fixed mode
+	F_OMEGA=0		# Q[16], Frozen value of OMEGA for omega-fixed mode
+	F_PSI=0           # Q[17], Frozen value of PSI for psi-fixed mode
+	F_NAZ=0		# Q[18], Frozen value of NAZ for naz-fixed mode
+	F_QAZ=0		# Q[19], Frozen value of QAZ for qaz-fixed mode
+	F_DEL=0		# Q[20], Frozen value of A[del] for delta-fixed mode
+	F_ETA=0		# Q[21], Frozen value of A[eta] for eta-fixed mode
+	F_CHI=0		# Q[22], Frozen value of A[chi] for chi-fixed mode
+	F_PHI=0		# Q[23], Frozen value of A[phi] for phi-fixed mode
+	F_NU=0		# Q[24], Frozen value of A[nu] for nu-fixed mode
+	F_MU=0		# Q[25], Frozen value of A[mu] for mu-fixed mode
+	F_CHI_Z=0		# Q[26], Value calculated for A[chi] in zone mode
+	F_PHI_Z=0		# Q[27], Value calculated for A[phi] in zone mode
+   # Cut points for the axis
+	CUT_DEL=-180	# Q[28], Cut point for del circle
+	CUT_ETA=-180	# Q[29], Cut point for eta circle
+	CUT_CHI=-180	# Q[30], Cut point for chi circle
+	CUT_PHI=-180	# Q[31], Cut point for phi circle
+	CUT_NU=-180		# Q[32], Cut point for mu circle
+	CUT_MU=-180		# Q[33], Cut point for nu circle
+	CUT_KETA=-180	# Q[34], Cut point for keta circle
+	CUT_KAP=-180	# Q[35], Cut point for kap circle
+	CUT_KPHI=-180	# Q[36], Cut point for kphi circle
+
+################### set psic parameters (G array)  ##############################
+   # preference flags
+	g_prefer=0		# G[0], Holds sector preference value.
+	g_sect=0	      # G[1], Holds sector mode.
+	g_frz=1	      # G[2], Nonzero when frozen mode is on. ie uses values in F_... for angle constraints
+   # reference vector
+	g_haz=0		# G[3], H of reference vector
+	g_kaz=0		# G[4], K of reference vector
+	g_laz=1		# G[5], L of reference vector
+   # zone vectors
+	g_zh0=0		# G[6], H of first zone mode vector
+	g_zk0=0		# G[7], K of first zone mode vector
+	g_zl0=0		# G[8], L of first zone mode vector
+	g_zh1=0		# G[9], H of second zone mode vector
+	g_zk1=0		# G[10], K of second zone mode vector
+	g_zl1=0		# G[11], L of second zone mode vector
+   #
+	g_kappa = 50.031  # G[12], Kappa tilt angle
+   #
+	g_sigtau=0		# G[15], Nonzero when using SIGMA_AZ and TAU_AZ to specify the reference vector
+				#        orientation instead of using the g_haz, g_kaz, g_laz
+   # set geometry constraint mode
+   # these settings give a four-circle alpha-fixed mode if F_NU = F_MU = 0
+	g_mode1=2		# G[16], Nu-fixed
+	g_mode2=2		# G[17], Alpha-fixed
+	g_mode3=2		# G[18], Mu-fixed
+	g_mode4=0		# G[19], --
+	g_mode5=0		# G[20], --
+
+################### set lattice and orientation parameters (U array)  ##############################
+   # lattice parameters
+	g_aa=1.54		# U[0], real-space a
+	g_bb=1.54		# U[1], real-space b
+	g_cc=1.54		# U[2], real-space c
+	g_al=90		# U[3], real-space alpha
+	g_be=90		# U[4], real-space beta
+	g_ga=90		# U[5], real-space gamma
+	g_aa_s=4.07999	# U[6], recip-space a* (x 2pi)
+	g_bb_s=4.07999	# U[7], recip-space b* (x 2pi)
+	g_cc_s=4.07999	# U[8], recip-space c* (x 2pi)
+	g_al_s=90		# U[9], recip-space alpha* 
+	g_be_s=90		# U[10], recip-space beta* 
+	g_ga_s=90		# U[11], recip-space gamma*
+
+   # orientation
+   # these settings define a unit orientation matrix.  
+   # Therefore, the azimuth vector (001) points along the 
+   # diffractometer Z-axis for all angles = 0. 
+   
+   # reflections
+   # or0
+	g_h0=1		#  U[12], h
+	g_k0=0		#  U[13], k
+	g_l0=0		#  U[14], l
+   # or1
+	g_h1=1		#  U[15], h
+	g_k1=0		#  U[16], k
+	g_l1=1		#  U[17], l
+
+   # angle settings
+   # or0
+	g_u00=60		#  U[18], del
+	g_u01=30		#  U[19], eta
+	g_u02=0 		#  U[20], chi
+	g_u03=0		#  U[21], phi
+	g_u04=0		#  U[22], nu
+	g_u05=0		#  U[23], mu
+   # or1
+	g_u10=90		#  U[24], del
+	g_u11=45		#  U[25], eta
+	g_u12=45		#  U[26], chi
+	g_u13=0		#  U[27], phi
+	g_u14=0		#  U[28], nu
+	g_u15=0		#  U[29], mu
+   
+   # lambdas for or's
+	g_lambda0=1.54	#  U[30], lambda or0 
+      g_lambda1=1.54	#  U[31], lambda or1
+   
+########################################################################
+# recalc the orientation matrix (UB) and current posiiton using 
+# the above set of numbers, note that LAMBDA = 1.54, ie may not be correct!
+calcG			# calc(4) in geo code calc UB
+calcHKL		# calc where we are from current motor settings (in A matrix)
+			# this is calc(2) in geo code
+# show where we are 
+wa
+wh
+
+########################################################################
+# Run specs startup macro
+# This calls the macros:
+# newsample, setscans, setplot, startgeo, setmono
+# 
+startup
+
+########  set mono params ###########
+# Get current LAMBDA based on current mono angle
+# Note this only works if mono is defined as a motor
+# Also note that the mono parameters are kept in the file:
+# SPECD/mono_settings
+# For the si(111) mon the d-spacing should be
+# g_mo_d=3.13555	# mono d-spacing
+
+getE		# this updates LAMBDA (note that UB doesnt depend on LAMBDA)
+calcHKL	# recalc our current HKL etc using updated LAMBDA			
+
+
+
+

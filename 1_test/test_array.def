@@ -1,0 +1,56 @@
+
+def test_array_mac '{
+      local rows, cols, num_rep, j, k;
+      rows = 50;
+      cols = 50;
+      num_rep = 10;
+
+      # print_test_array(test_array);
+      printf("Start Loop\n\n");
+      #local array test_array[rows][cols];
+
+      for(k=0;k<num_rep;k++){
+         local array test_array[rows][cols];
+         test_array = 0;
+         for(j=0;j<rows;j++){
+           test_array[j][] = fill_test_row(cols,k+j+1.01);
+         }
+
+         print_test_array(test_array);
+         printf("k = %d\n\n",k);
+      }
+
+}'
+
+
+def print_test_array(test_array) '{
+      local r, c, j, k, str;
+      r = array_op("rows",test_array);
+      c = array_op("cols",test_array);
+
+      for(j=0;j<r;j++){
+         str = "";
+         for(k=0;k<c;k++){
+               str = sprintf("%s %g ", str, test_array[j][k]);
+         }
+         printf("%s\n",str);
+      }
+
+}'
+
+
+
+def fill_test_row(ncol, f) '{
+      local j;
+      #local array test_row[1][ncol];
+      local array test_row[ncol];
+
+      for(j=0;j<ncol;j++){
+         #test_row[0][j] = j*f;
+         test_row[j] = j*f;
+      }
+
+     return(test_row)
+
+}'
+

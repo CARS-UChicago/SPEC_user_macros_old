@@ -1,0 +1,50 @@
+# use this to play around with macros
+
+###############################################
+# test the split command
+#def test '{
+#   local m[], n, str, j
+#   str = " the number of words is "
+#   n = split(str,m)
+#   p str, n
+#
+#  for (j=0;j<n;j++) p m[j];
+#
+#}'
+
+###############################################
+# test the cdef and cleanup stuff
+#def test '{
+#  
+#  cdef("cleanup_once","test2");
+#  cdef("cleanup_always","test3");
+#
+#  prdef cleanup_once
+#  prdef cleanup_always
+#  
+#  local j;
+#  for(j=0;j<10;j++){
+#      print j
+#     
+#      sleep(1)
+#  }
+#
+#}'
+#
+#def test2 ' p "here2" '
+#def test3 ' p "here3" '
+#
+###############################################
+
+###############################################
+# test some array stuff
+def test2(arr) '{
+    p array_op("rows",arr);
+    p array_op("cols",arr);
+}'
+
+# test some array stuff
+def test1 '{
+     local array tarr[10][2];
+     test2(tarr[0:3][]);
+}'

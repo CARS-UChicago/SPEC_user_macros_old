@@ -1,0 +1,816 @@
+##########################################################################################
+##########################################################################################
+#  Simple utilities                                                                      #
+##########################################################################################
+##########################################################################################
+
+############################################################################
+# macro to return the sign of a number
+def sign(x) '{ 
+    if (x < 0) {
+       return(-1)
+    } else if (x > 0) { 
+       return(1)
+    } else { 
+      return(0)
+    }      
+}'
+############################################################################
+#Macro to add an arbitrary note to the standard output data file
+
+def note '{
+	ok = 1
+	#Check for existance of the data file
+	if (DATAFILE !=""){
+		#Add a spacer line for the comment, date, and time
+		fprintf(DATAFILE, "\n#Note: %s\n", date())
+
+		while(ok) {
+			#Prompt user for note and store the string in an array
+			user_comment = input("add_note>>")
+			#check for cairrage return to terminate
+			if (user_comment == \r) ok=0	
+			#Write the comment to the data file
+			if (ok) fprintf(DATAFILE, "#Note: %s\n", user_comment)
+		}
+
+		#Add a closing spacer line for the comment
+		fprintf(DATAFILE, "\n")
+	}
+}'
+############################################################################
+# macro to return the square of a number
+def square(x) '{ 
+      return(x*x)      
+}'
+############################################################################
+
+############################################################################
+# macro to return the fraction part of a real number
+def get_frac(x) '{ 
+      x = fabs(x);
+      if ( x < 1 ) {
+         return(x);
+      } else {
+         return(  x - int(x)  )   
+      }   
+}'
+############################################################################
+
+
+##########################################################################################
+##########################################################################################
+#  Attenuators                                                                           #
+##########################################################################################
+##########################################################################################
+# ToDO
+#
+##########################################################################################
+# globals for attenuator macros macro
+##########################################################################################
+
+global SAT_CNTR_IDX
+if( unset("SAT_CNTR_IDX") )  SAT_CNTR_IDX = 3;   # bi
+
+global ATTEN_SET
+if( unset("ATTEN_SET") )    ATTEN_SET = FALSE; 
+
+#PV Values for unidig (control and status bit)
+global ATT_STATUS_BIT_1
+global ATT_STATUS_BIT_2  
+global ATT_STATUS_BIT_3  
+global ATT_STATUS_BIT_4  
+
+global ATT_CONTROL_BIT_1 
+global ATT_CONTROL_BIT_2 
+global ATT_CONTROL_BIT_3 
+global ATT_CONTROL_BIT_4 
+
+
+ATT_STATUS_BIT_1   = "13IDC:UnidigBi16.VAL"
+ATT_STATUS_BIT_2   = "13IDC:UnidigBi18.VAL"
+ATT_STATUS_BIT_3   = "13IDC:UnidigBi20.VAL"
+ATT_STATUS_BIT_4   = "13IDC:UnidigBi22.VAL"
+
+ATT_CONTROL_BIT_1  = "13IDC:UnidigBo17.VAL"
+ATT_CONTROL_BIT_2  = "13IDC:UnidigBo19.VAL"
+ATT_CONTROL_BIT_3  = "13IDC:UnidigBo21.VAL"
+ATT_CONTROL_BIT_4  = "13IDC:UnidigBo23.VAL"
+
+
+# does this work??
+# I think numeric arrays (ie defined as array) get blown away when 
+# when you restart spec, therefore we have to re-run atten_setup
+# after every startup..... need to fix this!
+if(ATTEN_SET == FALSE){  
+   array  atten_idx[16][4];
+   array  filter_idx[16][2];
+   array  ATTEN[4]
+          ATTEN = 0;
+#   array ATTEN_FACS[4]
+}
+
+global SAT_CNT_RATE
+if ( unset("SAT_CNT_RATE") ) SAT_CNT_RATE = 40000;
+global SAT_MIN_CNT_RATE
+if ( unset("SAT_MIN_CNT_RATE") ) SAT_MIN_CNT_RATE = 100;
+global ATTEN_FACS
+
+##########################################################################################
+def atten_setup '{
+
+
+      #assign attenuation factors for the four filters	
+	ATTEN_FACS["0"] = getval("enter atten factor for filter 1",ATTEN_FACS["0"])
+	ATTEN_FACS["1"] = getval("enter atten factor for filter 2",ATTEN_FACS["1"])
+	ATTEN_FACS["2"] = getval("enter atten factor for filter 3",ATTEN_FACS["2"])
+	ATTEN_FACS["3"] = getval("enter atten factor for filter 4",ATTEN_FACS["3"])
+      if (DATAFILE !=""){
+         fprintf(DATAFILE,"\n#ATTEN_FACTORS %g %g %g %g\n\n", ATTEN_FACS[0], ATTEN_FACS[1], ATTEN_FACS[2], ATTEN_FACS[3]);
+      }
+
+	#Get number of the detector to use
+      SAT_CNTR_IDX = getval("enter the number of the detector to use",SAT_CNTR_IDX)
+
+      #get maximum number of usable counts for the detector (when f=1)
+      SAT_CNT_RATE = getval("enter the saturation value for the detector (use f = 1)",SAT_CNT_RATE)
+	
+	#get the minimum number counts readable by detector
+	SAT_MIN_CNT_RATE = getval("enter the minimum value for the detector",SAT_MIN_CNT_RATE)
+
+	atten_setup_calc	
+
+}'
+
+def atten_setup_calc'{
+
+      # generate array containing all possible combinations of filters
+      atten_idx [][]= 0
+	atten_idx [4, 9:][0] = 1
+	atten_idx [3,6,7,8,12:][1] = 1
+	atten_idx [2,5,7,8,10,11,14,15][2] = 1
+	atten_idx [1,5,6,8,9,11,13,15][3] = 1
+
+
+
+      #Generate and store all of the attenuation factors in an array
+	local i, j
+      for (j=0;j < 16; j++) {
+	   #store index value in the array
+	   filter_idx[j][0] = j
+	   #compute net attenuation factor for the jth attenuator combination
+	   local array test[4]
+	   for (i=0; i <4; i++) {
+	      atten = atten_idx[j][i] * ATTEN_FACS[i]
+		   if (atten != 0) {
+		      test[i] = atten 
+		   } else {
+                   test[i] = 1
+               }
+	   }
+	   #store net attenuator factor in array
+	   filter_idx[j][1] = test[0] * test[1] * test[2] * test[3]		
+      }
+
+      #sort the filter_idx array in order of attenuation facors
+      local array x[16][3]
+      local k, n
+	x[][1] = array_op("sort", filter_idx[][1])
+	for (k=0; k<16; k++) {
+	    local array z[16][1]
+	    z = fabs(filter_idx[][1] - x[k][1])
+	    n = array_op("i_at_min", z)
+	    x[k][0] = n
+	}
+      filter_idx = x
+      ATTEN_SET = TRUE
+
+}'
+	
+##########################################################################################
+# Check saturation
+# note if do_set = 1 this will force the
+# update of the attenuators
+# otherwise this macro will only call add_atten if
+# it thinks it needs to. The return is zero if all ok,
+# 1 if the atten were not set correctley, -1 if problems
+#
+def CHECK_SAT(do_set) '{
+ 
+   # if setup routine hasnt been run. 
+   if (ATTEN_SET == FALSE) return(-1);
+
+   if (filter_idx == 0) atten_setup_calc;
+ 
+   # note NPTS is set in the _ascan macro
+   local num_rows, j, blah
+   num_rows = NPTS;
+
+   local array sat_mon_array[num_rows][1];
+   local sat_cnts, sat;
+   local array atten_level[4];
+               atten_level = 0;
+
+   ## look at cps in the det
+   sat_mon_array[][0] = SCAN_D[0:num_rows-1][SAT_CNTR_IDX+1]/SCAN_D[0:num_rows-1][sec+1];
+   sat_cnts = array_op("max", sat_mon_array[][0]);
+   p "Max Counts = " sat_cnts
+   #sat_cnts = 1e6;
+
+   #local z
+   #z = array_op("i_>=_value", filter_idx[][2],sat_cnts)
+
+
+   # check status of attenators
+   # note Low = 0 = "attenuator in" in the epics pv
+   # but were saying that if ATTEN[i] = 0 the atten is out
+   ATTEN[] = 0;
+
+   #Determine current attwnuator positions
+   if( epics_get(ATT_STATUS_BIT_1) == "Low") ATTEN[0]=1;
+   if( epics_get(ATT_STATUS_BIT_2) == "Low") ATTEN[1]=1;
+   if( epics_get(ATT_STATUS_BIT_3) == "Low") ATTEN[2]=1;
+   if( epics_get(ATT_STATUS_BIT_4) == "Low") ATTEN[3]=1;
+
+   
+sat = 0;
+if ((sat_cnts > SAT_CNT_RATE) || (sat_cnts < SAT_MIN_CNT_RATE)){
+
+	#Read current attenuator position and compute attenuation facor
+      local array g[4]
+      local i, atten, current_atten
+      for (i = 0; i < 4; i++) {
+	  atten = ATTEN[i] * ATTEN_FACS[i]
+	       if (atten != 0) {
+		    g[i] = atten 
+		 } else {
+                g[i] = 1
+             }
+       }
+       current_atten = g[0] * g[1] * g[2] * g[3]
+
+	#Find the filter index value for this attenuation factor
+      local factor
+	local array m[16][1]
+	m = fabs(filter_idx[][1] - current_atten)
+	n = array_op("i_at_min", m)
+	
+	if (sat_cnts < SAT_MIN_CNT_RATE){
+		#Find index of the next smallest attenuation
+		if (n < 1) n = 1;
+		factor = filter_idx[n-1][0]
+	}else{
+		#Find index of the next greatest attenuation
+	      if ( n > 14 ) n = 14;
+		factor = filter_idx[n+1][0]
+	}
+
+	#Read the binary attenuator values for this new attenuator value
+	atten_level[0] = atten_idx[factor][0];
+ 	atten_level[1] = atten_idx[factor][1];
+ 	atten_level[2] = atten_idx[factor][2];
+ 	atten_level[3] = atten_idx[factor][3];	 
+
+
+	#Check if new attenuator combination is different 
+	for(j=0;j<4;j++){
+	    if (atten_level[j] != ATTEN[j] ){
+	        sat = 1;
+	    }
+	}
+
+	#call the add_atten procedure
+	if (sat == 1 || do_set == 1) { 
+		add_atten( atten_level[0], atten_level[1], atten_level[2], atten_level[3] ); 
+  		p "Updating Attenuators"
+	}
+
+}
+return(sat);
+
+}'
+
+##########################################################################################
+## add attenuators for detector arm
+def add_atten(set1, set2, set3, set4) '{   
+
+array test[4]
+test = 1
+
+num_try = 0
+max_try = 10
+ok = 1
+
+#put the attenuators in the desired position and repeat command in unidig failed
+ while( (ok == 1) && (num_try < max_try) ){ 
+     #####
+     if ( set1 == 1){
+        if (test[0]==0){
+	    epics_put(ATT_CONTROL_BIT_1, 1); sleep(0.3);
+	    epics_put(ATT_CONTROL_BIT_1, 0)
+	  } else {
+          epics_put(ATT_CONTROL_BIT_1, 0)
+        }
+     } else{
+        epics_put(ATT_CONTROL_BIT_1, 1)
+     }
+     #####
+     if ( set2 == 1  ){
+	  if (test[1]==0){
+	     epics_put(ATT_CONTROL_BIT_2, 1); sleep(0.3)
+           epics_put(ATT_CONTROL_BIT_2, 0)
+	  } else {
+           epics_put(ATT_CONTROL_BIT_2, 0)
+        }
+     } else {
+        epics_put(ATT_CONTROL_BIT_2, 1)
+     }
+     #####
+     if ( set3 == 1  ){
+	  if (test[2]==0){
+	     epics_put(ATT_CONTROL_BIT_3, 1); sleep(0.3)
+           epics_put(ATT_CONTROL_BIT_3, 0)
+	  } else {
+           epics_put(ATT_CONTROL_BIT_3, 0)
+        }
+     } else {
+        epics_put(ATT_CONTROL_BIT_3, 1)
+     }
+     #####
+     if ( set4 == 1  ){
+	  if (test[3]==0){
+           epics_put(ATT_CONTROL_BIT_4, 1); sleep(0.3)
+           epics_put(ATT_CONTROL_BIT_4, 0)
+ 	  } else {
+           epics_put(ATT_CONTROL_BIT_4, 0)
+        }
+     } else {
+        epics_put(ATT_CONTROL_BIT_4, 1)
+     }
+     #####
+
+
+     sleep(0.5);
+
+    # check status of attenators
+    # note Low = 0 = "attenuator in" in the epics pv
+    # but were saying that if ATTEN[i] = 0 the atten is out
+    ATTEN[] = 0;
+    #Determine current attenuator positions
+    if( epics_get(ATT_STATUS_BIT_1) == "Low") ATTEN[0]=1;
+    if( epics_get(ATT_STATUS_BIT_2) == "Low") ATTEN[1]=1;
+    if( epics_get(ATT_STATUS_BIT_3) == "Low") ATTEN[2]=1;
+    if( epics_get(ATT_STATUS_BIT_4) == "Low") ATTEN[3]=1;
+    
+    num_try = num_try + 1;
+   
+   #Check to see if the unidig readback matches the desired setting
+   if (ATTEN[0]!=set1) {
+       test[0]=0;
+   } else {
+       test[0] = 1;
+   }
+   if (ATTEN[1]!=set2) {
+       test[1]=0;
+   } else {
+       test[1] = 1;
+   }
+
+   if (ATTEN[2]!=set3) {
+      test[2]=0;
+   } else {
+      test[2] = 1;
+   }
+   if (ATTEN[3]!=set4) {
+       test[3]=0;   
+   } else {
+       test[3] = 1;
+   }
+
+   #if all of the attenuators are correct, lower boolean flag
+   if (test[0] && test[1] && test[2] && test[3]) ok = 0;
+}
+
+}'
+############################################################################
+
+
+############################################################################
+#############################################################################
+# 
+# Smart(?) Centering scan
+#
+##############################################################################
+## centering scan 
+# gloabal for this macro
+global  CENTER_WIDTH_VAL
+def center '{
+	if ($# != 3) {
+        eprint "Usage:  center motor width time"	
+        exit
+	}
+      # $1 = motor, $2 = width, $3 = sc_ti
+
+      local width, st, en, np, ti, sc_ti, t_scale 
+      local num_rep, max_rep, exec, pos_0;
+      local MAX_REP, MIN_SCAN_W, MAX_SCAN_W, MIN_PTS, MAX_PTS
+      local test_sat, tmp, w_flag, do_cen;
+      local array scan_w[4]
+     
+      NUMBER_PTS  = 15;
+      MAX_REP     =  4;
+      MIN_SCAN_W  = 0.05;
+      MAX_SCAN_W  = 2.0;
+      MIN_PTS     = 10; 
+      MAX_PTS     = 40;
+      CEN_TEST    = FALSE;
+
+      width      = $2
+      sc_ti      = $3
+     # this calc of the count time forces the 
+     # scan to run at 0.02 deg/sec
+     # sc_ti = width / (NUMBER_PTS*0.02)
+
+      st          = -1*width/2;
+      en          =  width/2;
+      np          =  NUMBER_PTS;
+      t_scale     =  1;
+            
+
+      test_sat = 0;
+      scan_w   = 0;
+      tmp      = 0;
+      w_flag   = 0; 
+      do_cen   = FALSE; 
+      exec     = 1;
+      num_rep  = 0;
+
+ while( (exec==1) && (num_rep < MAX_REP) ) { 
+      ## do the scan
+      pos_0 = A[$1] 
+      if (CEN_TEST) {
+          fake_dscan $1 st en np sc_ti*t_scale 500 10 .05
+      } else {
+          dscan $1 st en np sc_ti*t_scale  
+      }
+
+      ## check for saturation and check the scan range 
+      # note these look at the data in the current SCAN_D array
+
+      # check for saturation, if test_sat = 0 then 
+      # the attenuators are set correctly 
+      test_sat = CHECK_SAT(0);
+ 
+                   
+      # only check the width if the attenuators were ok 
+      if( test_sat == 0 ){
+
+            scan_w = SC_WIDTH( pos_0 );
+            # the scan range is bad (but scan ok) if scan_w[0] == 1
+            # therefore determmine new scan range for repeat
+
+            if (scan_w[0] == 1){
+                tmp = scan_w[2] - scan_w[1] ;
+
+                # note if the peak is too wide/narrow but we are alrady at the
+                # max/min width should not repeat the scan
+
+                if(tmp > MAX_SCAN_W){
+                    if(st == -1*MAX_SCAN_W/2) {
+                        p "#Already at max scan range, not repeating"
+                        w_flag = 1;
+                    } else {
+                        st = -1*MAX_SCAN_W/2;
+                        en =    MAX_SCAN_W/2;
+                        np =    MAX_PTS;
+                    }
+                } else if(tmp < MIN_SCAN_W){
+                    if(st == -1*MIN_SCAN_W/2){
+                       p "#Already at min scan range, not repeating"
+                       w_flag= 1;
+                    } else {
+                       st = -1*MIN_SCAN_W/2;
+                       en =    MIN_SCAN_W/2;
+                       np =    MIN_PTS;
+                    }
+               } else {
+                   st  = scan_w[1];
+                   en  = scan_w[2];
+                   np  = scan_w[3];  
+               }
+
+               if (np >  MAX_PTS){ 
+                    np = MAX_PTS;  # max_scan_pts;
+               } else if(np < MIN_PTS){
+                    np = MIN_PTS;  # min_scan_pts;
+               }
+
+               # calc t_scale so the time per delta-x increment is constant
+               t_scale = (NUMBER_PTS/width)*( (en-st)/np )
+
+           }
+
+      } 
+  
+      # do we need another scan??
+      # good exit
+      if ( test_sat == 0 ){
+         if ( (scan_w[0] == 0) || (w_flag == 1)  ) {
+            exec = 0;
+            do_cen = TRUE;
+         } else if(scan_w[0] > 1) {
+            # bad exit
+            exec = 0;
+         }
+      } 
+      num_rep++;
+      
+      if (num_rep >= MAX_REP){
+          p "MAX repetitions reached in center"
+      }
+ }
+
+  # note do_cen was set to FALSE before above loop, therefore had to have a GOOD
+  # condition to get it set to TRUE, therefore if its still false somthing isnt right
+  # and we should abort!!!
+  # if get out of exec loop and it thinks all is ok
+  # then calc cen from SCAN_D and move the motor there.....
+
+local fw, cfw  
+if(do_cen){ 
+  # note just work on SCAN_D data, ie
+    local array DAT_X[NPTS][1]
+    local array DAT_Y[NPTS][1]
+
+    DAT_X[0:NPTS-1] = SCAN_D[0:NPTS-1][0]
+    DAT_Y[0:NPTS-1] = SCAN_D[0:NPTS-1][DET+1]/SCAN_D[0:NPTS-1][MON+1]
+
+    # what are the full width etc....
+    fw   =  array_op("fwhm",  DAT_X,DAT_Y);
+    cfw  =  array_op("cfwhm", DAT_X,DAT_Y);
+    if (fw == 0){                    # couldnt find a peak
+       do_cen = FALSE;
+    }
+
+    print "\n Center = ", cfw
+      
+    if (do_cen){
+        print "\n Moving to Center: "  cfw
+        if(CEN_TEST){
+          A[$1] = cfw
+        } else {         
+          mv $1 cfw
+          waitmove;
+        }
+    } else {
+       print "\n Motor not moved"
+    }
+}
+
+if (do_cen == FALSE) {
+    CENTER_WIDTH_VAL = 0;
+    p "Warning: MOTOR NOT MOVED"
+}else{
+    CENTER_WIDTH_VAL = 5*fw ;
+}
+
+}'
+#########################################################################################
+
+####################################################################
+# Peak - Iterate on center.
+def peak '{
+
+      local num_mots start_width num_loops
+	if ($# < 4 ) {
+	 eprint "Usage: Peak start_width num_loops time motors...\n "
+       exit
+	} 
+         
+       start_width = $1;
+       num_loops = $2; 
+       num_motors = $# - 3;
+
+	if (num_motors < 1) {
+		eprint "Number of motors < 1"
+		exit
+	} 
+	
+      local j k width
+
+      local array scan_widths[num_motors]
+      scan_widths = start_width;
+
+      for (j=0;j<num_loops;j++){     
+         if (num_motors >= 1){ 
+              center $4 scan_widths[0] $3 
+              scan_widths[0] = CENTER_WIDTH_VAL
+              if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+          }
+         if (num_motors >= 2){ 
+              center $5 scan_widths[1] $3 
+              scan_widths[1] = CENTER_WIDTH_VAL
+               if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+         }
+         if (num_motors >= 3){ 
+              center $6 scan_widths[2] $3 
+              scan_widths[2] = CENTER_WIDTH_VAL
+              if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+          }
+         if (num_motors >= 4){ 
+              center $7 scan_widths[3] $3 
+              scan_widths[3] = CENTER_WIDTH_VAL
+              if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+          }
+         if (num_motors >= 5){ 
+              center $8 scan_widths[4] $3 
+              scan_widths[4] = CENTER_WIDTH_VAL
+              if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+          }
+         if (num_motors >= 6){ 
+              center $9 scan_widths[5] $3 
+              scan_widths[5] = CENTER_WIDTH_VAL
+              if (CENTER_WIDTH_VAL == 0) {
+                 eprint "Problem exiting"
+                 exit
+              }
+          }
+
+      }
+
+}'
+
+##########################################################################################
+
+
+
+##########################################################################################
+##########################################################################################
+#  FAKE SCANS                                                                            #
+##########################################################################################
+##########################################################################################
+# Globals
+global FS_MOVE
+       FS_MOVE = 0
+global FS_WAIT
+       FS_WAIT = 0
+
+global FS_CEN 
+global FS_FWHM
+global FS_AMP
+
+##########################################################################################
+# a fake dscan
+def fake_dscan '{
+      # 
+      if (IS_TRAJ_SCAN == 1){
+          eprint "Sorry fake_dscan doesnt work with traj scans yet"
+          exit
+      }
+
+	if ($# != 8) {
+		eprint "Usage:  fake_dscan  motor start finish  intervals time peak_amp bgr fwhm"
+		exit
+	} 
+	_check0 "$1"
+ 
+      # let the world know this is a fake scan
+      # this is used by _loop, _head and _ascan
+      IS_FAKE_SCAN = 1;  
+   
+      if (FS_MOVE == 1) {
+         # if we are really moving the motors get the current positions 
+         waitall
+         get_angles
+      } else {
+         # otherwise update the A array, ie assume that HKL have been set
+         # and now get fake values for A array
+         # calcA
+         # actually just use the current A assuming that HKL are already updated
+         # by the caller .....
+      }
+
+ 	_m[0] = $1;    
+      _c1 = A[$1]
+      _s[0] = _c1 + $2 
+      _f[0] = _c1 + $3
+	_n1 = int($4); 
+      _ctime = $5
+	_nm = 1
+
+     # give vals for fake peak cen and fwhm
+      FS_CEN = ( _s[0] + _f[0] ) / 2;
+      FS_AMP = $6;
+      FS_BGR = $7;
+      FS_FWHM = $8;
+     
+     # add a little random shift to center
+     # FS_CEN = FS_CEN + (( _f[0] - _s[0] ) / 3)*( 2* (0.5 - rand(100)/100 ) ) 
+     # FS_CEN = FS_CEN + 2*FS_FWHM * ( 2* (0.5 - rand(100)/100 ) )
+     
+      _ascan
+   
+     # reset stuff after scan
+     fake_dscan_cleanup $1 _c1;
+
+}'
+
+##########################################################################################
+# fake dscan  cleanup
+# call at the end of a fake_dscan or when cntrl-c is hit (see the gse_cleanup macro)
+def fake_dscan_cleanup '{
+        IS_FAKE_SCAN = FALSE;
+        # FS_WAIT      = FALSE;
+        # FS_MOVE      = FASLE;
+        if($# == 2){
+            A[$1] = $2
+        }
+
+}'
+
+#########################################################################
+# "count" is called by the scans to count monitor or time.
+# It runs the clock and reads the scalers.
+def fake_scan_count '{
+        local j, arg, peak_amp, bgr, pos
+        # arg is either count time or number of monitor cnts
+        arg = $1
+        pos = A[_m[0]]
+
+        waitmove
+        for (j=0; j< COUNTERS ; j++) {
+            S[j] = 0;
+        }
+
+        # below is the "peak" function
+        peak_amp = FS_AMP / ( 1 + square( (pos - FS_CEN)/(FS_FWHM/2) ) );
+
+        # calc a background 
+        bgr = FS_BGR + ( sqrt(peak_amp+FS_BGR) * ( 2* (0.5 - rand(100)/100 ) ) ) ;
+        if (bgr <= 0) bgr = 0; 
+
+        #p peak_amp, bgr
+
+        # below is the "total" function cps
+        peak_amp = peak_amp + bgr;
+
+
+        # lets assume io is 1e6 cps.
+        # if MON = 1 using io as monitor
+        # if MON = 0 or -1 using seconds as monitor
+        if (MON == 1){
+           S[sec] = arg/1e6;
+           S[io] = arg;
+           S[i1] = (0.01)*arg* ( S[sec]*peak_amp/(FS_AMP+FS_BGR) );
+           S[DET] = S[sec]*peak_amp;
+        } else { 
+           S[sec]  = arg;
+           S[io] = (arg * 1e6) ;
+           S[i1] = (0.01)*( 1e6 )* (S[sec]*peak_amp/(FS_AMP+FS_BGR) ) ;
+           S[DET] = S[sec]*peak_amp;
+        }
+
+        if (S[sec] && MON >= 0)
+                MON_RATE=S[MON]/S[sec]
+
+       if(FS_WAIT) sleep(S[sec])
+
+}'
+
+#########################################################################
+
+#########################################################################
+# fake bragg move
+def fake_br '
+        if ($# != 3) {
+                eprint "Usage:  fake_br H K L"
+                exit
+        } ;
+        H=$1; K=$2; L=$3
+        calcA
+'
+#########################################################################
+# fake wh
+def fake_wh '
+        calcHKL
+        onp
+        _var
+        offp
+'
+#########################################################################
+

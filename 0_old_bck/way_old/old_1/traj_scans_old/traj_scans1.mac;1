@@ -1,0 +1,579 @@
+#
+#  @(#)scans1.mac	4.9  05/10/00 CSS
+#
+#  "Spec" Release 4
+#
+#  Copyright (c) 1988,1989,1990,1991,1992,1993,1994,1997,1998,1999,2000
+#  by Certified Scientific Software.
+#  All rights reserved.
+#  Copyrighted as an unpublished work.
+#
+#########################################################################
+
+#########################################################################
+#
+#                        SCAN-HELPER MACROS
+#
+#########################################################################
+#
+#  _ascan scans the number of motors given by _nm.
+#  The arrays _m[], _s[], _f[] and _d[] contain the motor
+#  numbers, start, finish and step sizes for each of the
+#  scanned motors.  The macros ascan, a2scan, a3scan and
+#  a4scan call _ascan.
+#
+def _ascan '
+	if (_n1 <= 0) {
+		eprint "Intervals <= 0"
+		exit
+	} ;
+	{
+	 local i
+	 for (i=0;i<_nm;i++) {
+		 _bad_lim = 0
+		 _chk_lim _m[i] _s[i]
+		 _chk_lim _m[i] _f[i]
+		 if (_bad_lim) exit;
+	 }
+	}
+	HEADING=_nm>1? sprintf("a%dscan ", _nm):"ascan "
+	{
+	 local i
+	 for (i=0;i<_nm;i++) {
+		HEADING=sprintf("%s%s",HEADING,sprintf(" %s %g %g ",\
+			motor_mne(_m[i]),_s[i],_f[i]))
+		_d[i] = (_f[i] - _s[i]) / _n1
+	 }
+	}
+	HEADING=sprintf("%s %g %g",HEADING,_n1,_ctime)
+	_n1++
+	_cols=_nm+_hkl_col
+	X_L = motor_name(_m[0])
+	Y_L = cnt_name(DET)
+	_sx = _s[0]; _fx = _f[0]
+	_stype = 1|(_nm<<8)
+	FPRNT=PPRNT=VPRNT=""
+	{
+	 local i
+	 for (i=0;i<_nm;i++) {
+	     FPRNT=sprintf("%s%s  ",FPRNT,motor_name(_m[i]))
+	     PPRNT=sprintf("%s%8.8s ",PPRNT,motor_name(_m[i]))
+	     VPRNT=sprintf("%s%9.9s ",VPRNT,motor_name(_m[i]))
+	 }
+	}
+	FPRNT=sprintf("%s%s  ",FPRNT,_hkl_sym1)
+	scan_head
+	PFMT=sprintf("%%s%%8.%df ",UP)
+	VFMT=sprintf("%%s%%9.%df ",UP)
+	def _scan_on \'
+	 for (; NPTS < _n1; NPTS++) {
+		local i
+		for (i=0;i<_nm;i++)
+			A[_m[i]] = _s[i] + NPTS * _d[i]
+		scan_move
+		FPRNT=PPRNT=VPRNT=""
+		for (i=0;i<_nm;i++) {
+		     FPRNT=sprintf("%s%.8g ",FPRNT,A[_m[i]])
+		     PPRNT=sprintf(PFMT,PPRNT,A[_m[i]])
+		     VPRNT=sprintf(VFMT,VPRNT,A[_m[i]])
+		}
+		FPRNT=sprintf("%s%s ",FPRNT,_hkl_val)
+		scan_loop
+		scan_data(NPTS,A[_m[0]])
+		scan_plot
+	 }
+	 scan_tail
+	\'
+	_scan_on
+'
+
+# Cleanup macro used by all of the scans.
+def _scanabort '
+	_cleanup2
+	_cleanup3
+	comment "Scan aborted after %g points" NPTS
+	sync
+'
+# `_cleanup2' and `_cleanup3' are available for higher level scan definitions
+def _cleanup2 ''
+def _cleanup3 ''
+
+# "resume" restarts aborted scans.  It relies on the user not
+#  tampering with the scan loop variables.
+#  (_stype&8 indicates a 2D-mesh scan).
+def resume '
+	if (NPTS >= (_stype&8? _n1*_n2:_n1)) {
+		eprint "Last scan appears to be finished."
+		exit
+	}
+	if (($1) && _stype&8)
+		eprint "Can\'t change the point number of a mesh scan."
+	else
+		NPTS += $1
+	if (NPTS < 0) NPTS  = 0
+	cdef("cleanup_once", "_scanabort;", "scan_cleanup")
+	comment "Scan resumed"
+	if (PLOT_MODE&1)
+		plot_cntl("erase")
+	_scan_on
+'
+# "scan_on" is the old name for "resume"
+def scan_on 'resume'
+#########################################################################
+#
+# Head macros - the heading is printed at the beginning of a scan.
+#
+
+# def Pheader 'printf("\n Setpoint = %g (%g C)\n", TEMP_SP,DEGC_SP)'
+# def Fheader '_cols++;printf("#X %gKohm (%gC)\n", TEMP_SP,DEGC_SP)'
+# def Plabel  'sprintf("%7.7s %7.7s ","T-set","T-degC")'
+# def Pout    'sprintf("%7.5g %7.5g ",TEMP_SP,DEGC)'
+# def Flabel  '"DegC  "'
+# def Fout    'sprintf("%g ",DEGC)'
+# def Ftail   'printf("#R %d %g %g %g %g %g %g\n", \
+#                 SCAN_N, pl_xMAX, pl_MAX, pl_FWHM, pl_CWHM, pl_COM, pl_SUM);'
+
+def Pheader ''          # Printer header
+def Fheader ''          # File header
+def Plabel  '""'        # Printer/Video label
+def Pout    '""'        # Printer/Video out
+def Flabel  '""'        # File label
+def Fout    '""'        # File out
+def Ftail   ''          # File tail
+
+cdef("user_prescan_head")
+cdef("user_Fheader")
+cdef("user_Pheader")
+cdef("user_postscan_head")
+cdef("user_scan_loop")
+cdef("user_scan_tail")
+
+#########################################################################
+#
+# The head macro, called by all the scans.
+def _head '
+	user_prescan_head
+	_scan_time
+	waitall; get_angles; calcHKL
+	NPTS = T_AV = MT_AV = 0
+	DATE = date()
+	TIME = TIME_END = time()
+	_cp = A[_pmot]
+	cdef("cleanup_once", "_scanabort;", "scan_cleanup")
+
+	# DATA FILE HEADER
+	if (DATAFILE != "") {
+		local i,j,z,s
+		ond; offt
+		printf("\n#S %d  %s\n#D %s\n",++SCAN_N,HEADING,DATE)
+		if (_ctime < 0)
+			printf("#M %g  (%s)\n", -_ctime, cnt_name(MON))
+		else
+			printf("#T %g  (%s)\n", _ctime, cnt_name(sec))
+
+		_head_par G 0
+		_head_par U 1
+		_head_par M 2
+
+		printf("#Q %s\n", _hkl_val)
+
+		for (i=0; i<MOTORS; i+= 8) {
+			s = sprintf("#P%d ",i/8)
+			for (j=i; j<i+8 && j<MOTORS;) {
+				if (motor_name(mA[j]) != "unused")
+					s = s sprintf("%.8g", A[mA[j]])
+				if (j%8 == 7)
+					break
+				s = s " "
+				j++
+			}
+			print s
+		}
+		Fheader
+		user_Fheader
+		z = _ctime < 0? sec:MON
+		for (i=j=0;i<COUNTERS;i++)
+			if (i != z && i != DET && is_using_counter(i))
+				j++
+		printf("#N %d\n", _cols + (MON<0? 2:3) + j)
+		_cols = 0
+		printf("#L %s%sEpoch",FPRNT,Flabel)
+		for (i=0;i<COUNTERS;i++)
+			if (i != z && i != DET && is_using_counter(i))
+				printf("  %s",cnt_name(i))
+		if (z >= 0)
+			printf("  %s",cnt_name(z))
+		printf("  %s\n",cnt_name(DET))
+		offd; ont
+	} else
+		SCAN_N++
+	T_L = sprintf("Scan %d", SCAN_N)
+
+	# PRINTER HEADER
+	ifp {
+		local i, j, k, s
+		onp; offt
+		printf("\n")
+		formfeed
+		printf("\nScan %3d   %s   file = %s  %s  user = %s\n",\
+			SCAN_N,DATE,DATAFILE,TITLE,USER)
+		printf("%s\n\n",HEADING)
+		for (i=0; i<MOTORS; i+=8) {
+			s = "  "
+			for (j=i; j<i+8 && j<MOTORS;) {
+				if (is_using_motor(mA[j]))
+					s = s sprintf("%9.9s", motor_name(mA[j]))
+				if (j%8 == 7)
+					break
+				s = s " "
+				j++
+			}
+			print s
+			s = "  "
+			for (j=i; j<i+8 && j<MOTORS;) {
+				if (is_using_motor(mA[j]))
+					s = s sprintf("%9.6g ", A[mA[j]])
+				if (j%8 == 7)
+					break
+				s = s " "
+				j++
+			}
+			print s
+		}
+		Pheader
+		user_Pheader
+		printf("\n  # %s %8.8s ", _hkl_sym11,cnt_name(sec))
+		if (MON >= 0)
+			printf("%8.8s ", cnt_name(MON))
+		printf("%8.8s %s%s\n", cnt_name(DET),PPRNT,Plabel)
+		offp; ont
+	}
+	# TTY HEADER
+	{
+		local i, n, s
+
+		if (DATAFILE == "/dev/null" || DATAFILE == "null")
+			s = "**NO DATA FILE**"
+		else
+			s = sprintf("file = %s", DATAFILE)
+		printf("\nScan %3d   %s   %s  %s  user = %s\n%s\n\n",\
+			SCAN_N,DATE,s,TITLE,USER,HEADING)
+		s = sprintf("  # %s%8.8s ", VPRNT,cnt_name(DET))
+
+		tty_cntl("resized?")
+		n = int((COLS - length(VPRNT) - length(Plabel) - 24) / 9)
+		if (MON >= 0) {
+			s = s sprintf("%8.8s ",cnt_name(MON))
+			n--
+		}
+		s = s sprintf("%10.10s ",cnt_name(sec))
+
+		for (i=0; i<COUNTERS && n>0; i++) {
+			if (i!=DET && i !=MON && i!=sec && is_using_counter(i)) {
+				s = s sprintf("%8.8s ", cnt_name(i))
+				n--
+			}
+		}
+		printf("%s%s\n",s,Plabel)
+	}
+	user_postscan_head
+'
+# Used by head to print-out the total scan time
+def _scan_time '{
+	local t n
+
+	n=_stype&8? _n1*_n2:_n1
+	printf("Total %d points, ", n)
+	t = n*_ctime
+	if (_ctime < 0) {
+		printf("%g %s counts", -t,cnt_name(MON))
+		if (MON_RATE) {
+			t /= -MON_RATE
+			printf("\nEstimated ")
+		}
+	}
+	if (_sleep)
+		t += n*_sleep
+	if (t > 0) {
+		local h m s
+		h=int(t/3600); m=int(t/60)-h*60; s=int(t)-h*3600-m*60
+		printf("%g seconds", t)
+		if (h || m)
+			printf(" (%d:%2.2d:%2.2d)",h,m,s)
+	}
+	printf("\n")
+}'
+# Used by head to save various geometry parameters
+# $1 is parameter name.  $2 is #G suffix
+def _head_par '
+	if (whatis("$1[0]")) {
+		local i
+		printf("#G$2")
+		for (i=0;;i++)
+			if (whatis(sprintf("$1[%d]", i)))
+				printf(" %g", $1[i])
+			else break
+		printf("\n")
+	}
+'
+
+# The loop macro, called by all the scans at each iteration
+def _loop '{
+	local z,i,n
+	if (!set_sim(-1) && _sleep) {
+		do_sleep _sleep
+	}
+	measure0
+	scan_count _ctime
+	measure1
+	measure2
+	z = _ctime < 0? sec:MON
+	T_AV += DEGC;
+	if (z >= 0)
+		MT_AV += S[z]
+	s = sprintf("%3d %s%8.0f ", NPTS,VPRNT,S[DET])
+
+	tty_cntl("resized?")
+	n = int((COLS - length(VPRNT) - length(Pout) - 24) / 9)
+	if (MON >= 0) {
+		s = s sprintf("%8.0f ", S[MON])
+		n--
+	}
+	s = s sprintf("%10.6g ",S[sec])
+
+	for (i=0; i<COUNTERS && n>0; i++) {
+		if (i!=DET && i !=MON && i!=sec && is_using_counter(i)) {
+			s = s sprintf("%8.4g ", S[i])
+			n--
+		}
+	}
+
+	printf("%s%s\n",s,Pout)
+
+	ifp {
+		fprintf(PRINTER,"%3d %s %8.6g ", NPTS,_hkl_val11,S[sec])
+		if (MON >= 0)
+			fprintf(PRINTER,"%8.0f ", S[MON])
+		fprintf(PRINTER,"%8.0f %s%s\n", S[DET],PPRNT,Pout)
+	}
+	if (DATAFILE != "") {
+		fprintf(DATAFILE,"%s%s%d",FPRNT,Fout,(TIME_END=time())-EPOCH)
+		for (i=0;i<COUNTERS;i++)
+			if (i != z && i != DET && is_using_counter(i))
+				fprintf(DATAFILE," %g",S[i])
+		if (z >= 0)
+			fprintf(DATAFILE," %g",S[z])
+		fprintf(DATAFILE," %g\n",S[DET]);
+	}
+        user_scan_loop
+}'
+# The tail macro, called by all the scans when they complete
+def _tail '
+	user_scan_tail
+	cdef("cleanup_once", "", "scan_cleanup", "delete")
+	TIME_END = time()
+	if (!(_stype&8)) {
+		ond; offt
+		Ftail
+		offd; ont
+		plot
+	}
+'
+def setscans '
+    _sleep = getval("\nSleep (settle) time before each scan point",_sleep)
+    _upd_flg = yesno("Show updated moving and counting during scans",_upd_flg)
+    _set_upd
+    _pre_chk = yesno("Do hklscan prescan limit-check loops",_pre_chk)
+'
+
+def _set_upd '
+	if (_upd_flg) {
+		rdef _move  \'_upd_move\'
+		rdef _count \'_upd_count\'
+	} else {
+		rdef _move  \'_ord_move\'
+		rdef _count \'_ord_count\'
+	}
+'
+# basic updated move
+def _upd_move '
+	move_em
+	for (;;) {
+		local i, done
+		get_angles
+		printf("\r%3d",NPTS)
+		if (_stype&1)
+		    for (i=0;i<_nm;i++)
+			printf(" %9.4f",A[_m[i]])
+		else if (_stype&2)
+		    for (i=0;i<_numgeo;i++)
+			printf(" %9.4f",A[mA[i]])
+		tty_cntl("ce")
+		printf("\r")
+		if (done)
+			break;
+		sleep(UPDATE)
+		done = !chk_move
+	}
+	calcHKL
+'
+# basic updated count
+#       Nov 1, 1994 - removed initial "waitmove", as it interfered
+#       with new count-while-moving macros.
+def _upd_count '
+	if ($1) for (;;) {
+		count_em $1
+		for (;;) {
+			local   done
+			get_counts
+			printf("\r%3d %s%8.0f ", NPTS,VPRNT,S[DET])
+			if (MON >= 0)
+				printf("%8.0f ", S[MON])
+			printf("%10.6g", S[sec])
+			tty_cntl("ce")
+			printf("\r")
+			if (done)
+				break
+			sleep(UPDATE)
+			done = !chk_count
+		}
+		chk_beam
+	}
+'
+# ordinary move
+def _ord_move 'move_em; waitmove; get_angles; calcHKL'
+# ordinary count
+def _ord_count 'count'
+
+def scan_head  '_head'
+def scan_loop  '_loop'
+def scan_move  '_move'
+def scan_count '_count'
+def scan_plot  '_plot'
+def scan_tail  '_tail'
+
+# Parameterize HKL formats, to accommodate two-circle, etc. geometry
+
+def _hkl_val 'sprintf("%g %g %g",H,K,L)'
+def _hkl_val11 'sprintf("%11.5g %11.5g %11.5g",H,K,L)'
+def _hkl_sym1 '"H  K  L"'
+def _hkl_sym2 '"HKL"'
+	       # 12345678901 12345678901 12345678901
+def _hkl_sym11 '"          H           K           L"'
+
+constant _hkl_col 3
+
+# Some people don't use HKL
+def no_hkl '
+	def _hkl_val \'""\'
+	def _hkl_val11 \'""\'
+	def _hkl_sym1 \'""\'
+	def _hkl_sym2 \'""\'
+	def _hkl_sym11 \'""\'
+	def calcHKL \'\'
+	constant _hkl_col 0
+
+	def _un \'if (whatis("\$1")&2) undef \$1\'
+	_un hklscan
+	_un hklmesh
+	_un _hklmesh
+	_un hkcircle
+	_un hlcircle
+	_un klcircle
+	_un hkradial
+	_un hlradial
+	_un klradial
+	_un _hklline
+	_un abscan
+	_un abmesh
+	_un _abmesh
+	_un th2th
+	_un hscan
+	_un kscan
+	_un lscan
+	_un an
+	_un uan
+	_un _an
+	_un br
+	_un ubr
+	_un _br
+	_un mk
+	_un _mk
+	_un _mk
+	_un _updateHKL
+	_un cal
+	_un ca
+	_un ci
+	_un wh
+	_un _var
+
+	undef _un
+'
+
+# Usage:  _chk_lim motor position
+def _chk_lim '{
+	local u t
+
+	if ((u = dial($1, $2)) < (t = get_lim($1, -1))) {
+		eprintf("%s will hit low limit at %g.\n",motor_name($1),t)
+		_bad_lim++
+	} else if (u > (t = get_lim($1, 1))) {
+		eprintf("%s will hit high limit at %g.\n",motor_name($1),t)
+		_bad_lim++
+	}
+}'
+
+# _hkl_lim does _chk_lim for motors used in general HKL scan.
+def _hkl_lim ''
+
+# Scan globals
+global DATE TIME TIME_END       # Start date, start and end times of scans
+global HEADING TITLE SCAN_N     # Scan header, title and number
+global DATAFILE                 # Data file
+global FPRNT PPRNT VPRNT        # File, printer and video strings
+global PFMT VFMT                # Format strings
+global X_L                      # Label for independent variable
+global Y_L                      # Label for dependent variable
+global T_L                      # Label for title (scan number, usually)
+global NPTS                     # Counter for point number in scans
+global T_AV                     # Average temperature (from DEGC)
+global MT_AV                    # Average monitor counts (from S[mon])
+
+global  _nm             # Number of motors in angle scan for _ascan
+global  _m _s _f _d     # Arrays for _ascan
+global _m1 _m2 _m3      # Motor numbers for 1, 2 and 3 motor scans
+global _s1 _s2 _s3      # Starting positions for 1, 2 and 3 parameter scans
+global _f1 _f2 _f3      # Finish positions
+global _d1 _d2 _d3      # Step sizes
+global _c1 _c2 _c3 _c4  # Current (or center) positions for delta scans
+global _sx _fx          # Minimum and maximum x values for plotting
+global _n1 _n2          # Number of points for scans
+global _g1 _g2          # Point counters in grid scans
+global _numgeo          # Number of motors for geometry configuration
+global _cols            # Number of extra columns to add to data file
+global _const           # Used with HKL radial and arc scans
+global _ctime           # Count time for the scans
+global _stime           # Optional sleep time for temperature scans
+global _sleep           # Precounting sleep time
+global _bad_lim         # Flag used in the limit-checking macros
+global _pre_chk         # If set, do prescan limit checks
+global _upd_flg         # If set, do updated counting and moving in scans
+global _stype           # Scan type
+			# These scan-type bit flags are not defined
+			# as symbols to conserve symbol table space.
+			#       0 = not in scan
+			#       1 = motor scan
+			#       2 = hkl scan
+			#       4 = temp scan
+			#       8 = mesh scan
+			# High byte of scan types holds number of motors
+			# being scanned in motor scans
+global _pmot            # Motor number for powder averaging
+global _pwid            # Width in degrees for powder average
+global _cp              # Start position of _pmot for angle scans
+
+if (unset("_pre_chk"))
+	_pre_chk = 1
+
+_set_upd                # Assign _move and _count definitions
+

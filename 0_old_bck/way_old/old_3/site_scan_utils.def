@@ -1,0 +1,113 @@
+##########################################
+# globals for saturation macro
+##########################################
+array  ATTEN[4]
+       ATTEN = 0;
+global SAT_CNTR_IDX
+       SAT_CNTR_IDX = 2;   # i1
+
+# cps in i1 when bicron is sat ....
+array SAT_CNTR_VAL[4]
+       SAT_CNTR_VAL[0] = 1e5;  # add atten 1  
+       SAT_CNTR_VAL[1] = 5e5;  # add atten 2
+       SAT_CNTR_VAL[2] = 1e6;  # add atten 3
+       SAT_CNTR_VAL[3] = 5e6;  # add atten 4
+
+##########################################
+# note if do_set = 1 this will force the
+# update of the attenuators
+# otherwise this macro will only call add_atten if
+# it thinks it needs to.
+#
+def CHECK_SAT(do_set) '{
+
+   # note NPTS is set in the _ascan macro
+   local num_rows, j
+   num_rows = NPTS;
+
+   local array sat_mon_array[num_rows][1];
+   local sat_cnts, sat;
+   local array atten_level[4];
+               atten_level = 0;
+
+   sat_mon_array[][0] = SCAN_D[0:num_rows-1][SAT_CNTR_IDX+1]/SCAN_D[0:num_rows-1][sec+1];
+   sat_cnts = array_op("max", sat_mon_array[][0]);
+   # p "Sat cnt = " sat_cnts
+ 
+ if( sat_cnts  < SAT_CNTR_VAL[0] ) atten_level = 0;
+ if( sat_cnts >= SAT_CNTR_VAL[0] ) atten_level[0] = 1;
+ if( sat_cnts >= SAT_CNTR_VAL[1] ) atten_level[1] = 1;
+ if( sat_cnts >= SAT_CNTR_VAL[2] ) atten_level[2] = 1;
+ if( sat_cnts >= SAT_CNTR_VAL[3] ) atten_level[3] = 1;
+
+ sat = 0;
+ for(j=1;j<4;j++){
+     if (atten_level[j] != ATTEN[j] ){
+         sat = 1;
+     }
+ }
+
+if (sat == 1 || do_set == 1) { 
+  add_atten( atten_level[0], atten_level[1], atten_level[2], atten_level[3] ); 
+  p "Updating Attenuators"
+}
+return(sat);
+
+}'
+
+############################################################################
+## add attenuators
+def add_atten(set1, set2, set3, set4) '{   
+ 
+ if ( set1 == 1  ){
+     epics_put("13IDC:UnidigBo17.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo17.VAL",1)
+ }
+
+ if ( set2 == 1  ){
+     epics_put("13IDC:UnidigBo19.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo19.VAL",1)
+ }
+
+ if ( set3 == 1  ){
+     epics_put("13IDC:UnidigBo21.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo21.VAL",1)
+ }
+
+ if ( set4 == 1  ){
+     epics_put("13IDC:UnidigBo23.VAL",0)
+ } else {
+     epics_put("13IDC:UnidigBo23.VAL",1)
+ }
+
+
+# test
+#p epics_get("13IDC:UnidigBi17.VAL")
+#p epics_get("13IDC:UnidigBi19.VAL")
+#p epics_get("13IDC:UnidigBi21.VAL")
+#p epics_get("13IDC:UnidigBi23.VAL")
+#p " "
+
+sleep(1);
+
+# check status of attenators
+# note Low = 0 = attenuator in the epics pv
+# but were saying that iff ATTEN[i] = 0 the atten is out
+ATTEN = 0;
+if( epics_get("13IDC:UnidigBi16.VAL") == "Low") ATTEN[0]=1;
+if( epics_get("13IDC:UnidigBi18.VAL") == "Low") ATTEN[1]=1;
+if( epics_get("13IDC:UnidigBi20.VAL") == "Low") ATTEN[2]=1;
+if( epics_get("13IDC:UnidigBi22.VAL") == "Low") ATTEN[3]=1;
+
+}'
+############################################################################
+
+
+
+
+
+
+# check for width vs range ...

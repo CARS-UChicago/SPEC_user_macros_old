@@ -1,0 +1,1291 @@
+#++++ install source file:  /home/specadm/spec5.01.01/macros/README.mac
+#  @(#)README.mac	5.1  01/29/01 CSS
+#
+# Please do not edit the standard CSS macro files.  When spec is
+# updated or reinstalled, all such changes will get clobbered.  If
+# you need to change the standard macros, place the modified
+# macros in one of the following files, as appropriate.
+#
+#      SPECD/site_f.mac        (read only when starting fresh)
+#      SPECD/site.mac          (read each time each user starts)
+#      SPECD/fourc/conf.mac    (or sixc, spec, kappa, etc.)
+#      ./spec.mac              (relative to start up directory)
+#
+# None of these files are created by the spec installation.  They
+# are locally created and maintained files.  Each file, if it exists,
+# is read in the order listed above, after the standard CSS macro
+# files are read.  Macros definitions in the above files will replace any
+# macros of the same name that were read from the standard CSS macro
+# files.
+#
+# If you do need to change a standard macro for your site, please
+# contact CSS so that, if practical, future versions of the standard
+# macros will be redesigned to accommodate your needs.
+#
+#++++ install source file:  /home/specadm/spec5.01.01/macros/fourc.src
+#
+#  @(#)fourc.src	5.6  07/27/01 CSS
+#
+#  "Spec" Release 5
+#
+#  Copyright (c) 1988,1989,1990,1991,1992,1993,1995,1997,1998,2001
+#  by Certified Scientific Software.
+#  All rights reserved.
+#  Copyrighted as an unpublished work.
+#
+#########################################################################
+#
+#
+#  Four Circle Diffractometer - four variations are supported:
+#
+#    - the standard configuration.
+#
+#    - a "kappa"-type diffractometer
+#
+#    - an "omega"-type diffractometer where the Theta motor
+#      is linked withing gearing to the Two-Theta motor.
+#
+#    - a "picker"-type diffractometer where the Chi and Phi
+#      motors are linked via gearing, such that
+#               A[phi] = r * A[chi] + A[phiR]
+#     where "phiR" is the real "phi" motor and r is a constant.
+#     In order to trigger adjustment of the phiR position to keep
+#     phi fixed when chi is moved, chi is also a pseudomotor, with
+#     chiR the corresponding real motor.
+#
+#  Spec determines which variation is in use by the motor
+#  mnemonics.  If a "th" motor exists, then the "omega"-type
+#  is ruled out.  Otherwise, if the "tth", "om", "chi" and "phi"
+#  motors exist, "is_omega" is set.
+#
+#  For the normal fourc and for the picker and kappa variations,
+#  the motors "tth", "th", "chi" and "phi" must exist.  In
+#  addition, if "kth", "kap" and "kphi" exist, then "is_kappa"
+#  is set.  Otherwise, if "chiR" and "phiR" exist, "is_picker"
+#  is set.
+
+# "_assign" is called after reading the motor configuration.
+# The array mA[] sets the order of the motor numbers used for
+# displaying motor information.
+# The first _numgeo (=4) motors in mA[] must agree with the geometry
+# code (geo_fourc.c) for the orientation macros (UB) to work properly
+# (see ub.mac).
+# "_assign_mA" is called to assign the remaining motors to mA
+#
+def _assign '{
+	constant is_picker 0
+	if (motor_mne(th) == "th") {
+		constant is_omega 0
+		if (motor_mne(chiR) == "chiR" && motor_mne(phiR) == "phiR")
+			constant is_picker 1
+	} else if (motor_mne(om) == "om")
+		constant is_omega 1
+
+	mA[0] = tth
+	mA[1] = is_omega? om:th
+	mA[2] = chi
+	mA[3] = phi
+	_numgeo = 4
+
+	if (motor_mne(kth) == "kth" \
+	     && motor_mne(kap) == "kap" \
+	       && motor_mne(kphi) == "kphi") {
+		constant is_kappa 1
+		mA[4]=kth
+		mA[5]=kap
+		mA[6]=kphi
+		_assign_mA 7
+	} else {
+		constant is_kappa 0
+		_assign_mA 4
+	}
+}'
+_assign
+
+## These first macros are redefined for each particular geometry.
+
+def ca '
+	if ($# != 3) {
+		eprint "Usage:  ca H K L"
+		exit
+	} ;
+	{H = $1; K = $2; L = $3}
+	if (calcA) {
+		waitmove; get_angles; calcHKL
+		exit
+	}
+	calcHKL
+	onp
+	printf("\nCalculated Positions:\n")
+	_var
+	offp
+	waitmove; get_angles; calcHKL
+'
+
+# A macro called by "wh", "ca" and "ci" to display important
+# geometry quantities.
+# For omega-type diffractometer, no need to include OMEGA in
+# header, as it is a motor.
+rdef _var  is_omega? '
+	printf("\nH K L =  %.5g  %.5g  %.5g\n", H,K,L)
+	printf("Alpha = %.5g  Beta = %.5g  Azimuth = %.5g  Lambda = %g\n\n",\
+		ALPHA,BETA,AZIMUTH,LAMBDA)
+	_mot _numgeo
+':'
+	printf("\nH K L =  %.5g  %.5g  %.5g\n", H,K,L)
+	printf("Alpha = %.5g  Beta = %.5g  Azimuth = %.5g\n",\
+		ALPHA,BETA,AZIMUTH)
+	printf("Omega = %.5g  Lambda = %g\n\n",OMEGA,LAMBDA)
+	_mot (is_kappa?7:_numgeo)
+'
+
+# _hkl_lim does limit checking for motors used in general HKL scan.
+rdef _hkl_lim is_kappa? '
+	_chk_lim tth A[tth]
+	_chk_lim kth A[kth]
+	_chk_lim kap A[kap]
+	_chk_lim kphi A[kphi]
+':'
+	_chk_lim tth A[tth]
+	_chk_lim mA[1] A[mA[1]]
+	_chk_lim chi A[chi]
+	_chk_lim phi A[phi]
+'
+
+# Plane - move chi and phi
+def pl  '_pl $*; move_poll'
+def upl '_pl $*; _update("chi phi")'
+def _pl '
+	if ($# != 2) {
+		eprint "Usage:  pl chi phi"
+		exit
+	} 
+	waitmove; get_angles; A[chi]=$1; A[phi]=$2
+	ifp { fprintf(PRINTER,"\nmv chi %g\nmv phi %g\n", $1, $2) } 
+	move_em
+'
+
+# freeze (and unfreeze) depending on mode.
+# use current position if no arguments, otherwise use arguments.
+def freeze   '
+	if ($# == 0) {
+		waitmove; get_angles
+	}
+	g_frz = 1
+	if (g_mode == 1) {
+		F_OMEGA = $# == 1? ($1):OMEGA
+		comment "Freezing Omega at %g" "F_OMEGA"
+	} else if (g_mode == 2) {
+		F_CHI_Z = $# == 2? ($1):A[chi]
+		comment "Freezing Chi at %g" "F_CHI_Z"
+		F_PHI_Z = $# == 2? ($2):A[phi]
+		comment "Freezing Phi at %g" "F_PHI_Z"
+	} else if (g_mode == 3) {
+		F_PHI = $# == 1? ($1):A[phi]
+		comment "Freezing Phi at %g" "F_PHI"
+	} else if (g_mode == 4) {
+		F_AZIMUTH = $# == 1? ($1):AZIMUTH
+		comment "Freezing Azimuth at %g" "F_AZIMUTH"
+	} else if (g_mode == 5) {
+		F_ALPHA = $# == 1? ($1):ALPHA
+		comment "Freezing Alpha at %g" "F_ALPHA"
+	} else if (g_mode == 6) {
+		F_BETA = $# == 1? ($1):BETA
+		comment "Freezing Beta at %g" "F_BETA"
+	} else {
+		comment "Frozen mode on"
+	}
+'
+def unfreeze '
+	if (g_frz) {
+		g_frz = 0
+		comment "Frozen mode off"
+	} else
+		print "Frozen mode already off."
+'
+# Set geometry mode
+def setmode '
+	if ($# == 1) {
+		_1 = $1
+	} else if ($# == 0) {
+		printf("\nChoose a four-circle geometry mode:\n\n")
+		for (i = 0; i <= MODES; i++)
+			printf("  %2d %s\n", i, gmodes[i])
+		_1 = getval("\nYour choice", g_mode)
+		printf("\n")
+	} else {
+		eprint "Usage:  setmode  or  setmode mode"
+		exit
+	}
+	if (_1 < 0 || _1 > MODES) {
+		eprintf("Valid modes are from 0 to %d.\n",MODES)
+		exit
+	}
+	if (_1 != g_mode) {
+		qcomment "Mode reset from %d to %d" "g_mode, _1"
+		g_mode = _1
+		printf("Now using ")
+	} else
+		printf("Still using ")
+	printf("%s mode.\n", gmodes[g_mode])
+	if (_1 >= 4 && _1 <= 6 && g_sect >= 4)
+		print "(Warning:  You have an illegal sector for this mode.)"
+'
+
+# Set sector used by some of the modes.
+def setsector '
+	if ($# == 1) {
+		_1 = $1
+	} else if ($# == 0) {
+		_1 = getval("\nGeometry sector", g_sect)
+	} else {
+		eprint "Usage:  setsector  or  setsector sector"
+		exit
+	}
+	if (_1 < 0 || _1 > (is_kappa? 7:8)) {
+		eprintf("Valid sectors are from 0 to %d\n", is_kappa? 7:8)
+		exit
+	}
+	if (_1 != g_sect) {
+		qcomment "Sector reset from %d to %d" "g_sect, _1"
+		g_sect = _1
+		printf("Now using ")
+	} else {
+		printf("Still using ")
+	}
+	if (_1 == 0) printf("no sector transformations.\n")
+	else if (_1 < 8) {
+		printf("...\n")
+		if (_1 == 1) {
+			printf("
+    Omega -> Omega - 180
+      Chi -> -Chi
+      Phi -> Phi - 180\n")
+
+		} else if (_1 == 2) {
+			printf("
+    Omega -> -Omega
+      Chi -> Chi - 180
+Two Theta -> -Two Theta\n")
+
+		} else if (_1 == 3) {
+			printf("
+    Omega -> 180 - Omega
+      Chi -> 180 - Chi
+      Phi -> Phi - 180
+Two Theta -> -Two Theta\n")
+
+		} else if (_1 == 4) {
+			printf("
+    Omega -> -Omega
+      Chi -> 180 - Chi
+      Phi -> Phi - 180\n")
+
+		} else if (_1 == 5) {
+			printf("
+    Omega -> 180 - Omega
+      Chi -> Chi - 180\n")
+
+		} else if (_1 == 6) {
+			printf("
+      Chi -> -Chi
+      Phi -> Phi - 180
+Two Theta -> -Two Theta\n")
+
+		} else if (_1 == 7) {
+			printf("
+    Omega -> Omega - 180
+Two Theta -> -Two Theta\n")
+		}
+	} else
+	    printf("\"arcs\" mode, minimize abs(Chi - 90) and abs(Phi).\n")
+	if (g_mode == 2) {
+		Z[0]=g_zh0
+		Z[1]=g_zk0
+		Z[2]=g_zl0
+		Z[3]=g_zh1
+		Z[4]=g_zk1
+		Z[5]=g_zl1
+		calcZ
+		if (F_PHI_Z != A[phi] || F_CHI_Z != A[chi]) {
+			freeze
+		}
+	}
+'
+
+# Set azimuthal reference
+def setaz '
+	if ($# == 3) {
+		_1 = $1; _2 = $2; _3 = $3
+	} else if ($# == 0) {
+		print "\nEnter azimuthal reference H K L:"
+		_1 = getval(" Azimuthal H", g_haz)
+		_2 = getval(" Azimuthal K", g_kaz)
+		_3 = getval(" Azimuthal L", g_laz)
+	} else {
+		eprint "Usage:  setaz  or  setaz H K L"
+		exit
+	}
+	gpset _1 g_haz
+	gpset _2 g_kaz
+	gpset _3 g_laz
+'
+# display all motor positions for all possible sectors.
+# g_sect is restored to saved value each time to help if preserve value
+# in case user hits ^C during printing.
+def sectors '
+	if ($# != 3) {
+		eprint "Usage:  sectors H K L" ; exit
+	}
+	{
+	 local i j sav_sect max
+	 printf("# %8.8s %8.8s %8.8s %8.8s ","Alpha","Beta","Azimuth","Omega")
+	 for (i=0;i<4;i++) printf("%9.9s",motor_name(mA[i]))
+	 print
+	 sav_sect = g_sect
+	 rdef cleanup \'g_sect=sav_sect;get_angles;calcHKL;undef cleanup\'
+	 max = is_kappa? 8:9
+	 for (j=0;j<max;j++) {
+	  if (g_mode >= 4 && j == 4) break
+	  H=$1;K=$2;L=$3
+	  g_sect=j
+	  calcA; calcHKL
+	  printf("%1d %8.5g %8.5g %8.5g %8.5g ",j,ALPHA,BETA,AZIMUTH,OMEGA)
+	  for (i=0;i<4;i++) printf("%9.9s",A[mA[i]])
+	  print
+	 }
+	 g_sect = sav_sect; get_angles; calcHKL
+	 undef cleanup
+	}
+'
+
+def pr_freeze '
+	if (g_mode == 0)       printf("Omega = 0")
+	else if (g_mode == 1)  printf("Omega = %g", F_OMEGA)
+	else if (g_mode == 2)  printf("Chi = %g, Phi = %g",F_CHI_Z,F_PHI_Z)
+	else if (g_mode == 3)  printf("Phi = %g", F_PHI)
+	else if (g_mode == 4)  printf("Azimuth = %g",F_AZIMUTH)
+	else if (g_mode == 5)  printf("Alpha = %g",F_ALPHA)
+	else if (g_mode == 6)  printf("Beta = %g",F_BETA)
+'
+# list geometry parameters
+def pa '
+	if (g_mode < 0 || g_mode > MODES) {
+		eprintf("\nNo such geometry mode (%d)\n", g_mode)
+		exit
+	}
+	onp
+	if (is_kappa)
+		printf("\nKappa-%g %sGeometry, %s (mode %d)",\
+			g_kappa,g_vmode? "Vertical ":"",gmodes[g_mode],g_mode)
+	else
+		printf("\nFour-Circle Geometry, %s (mode %d)",\
+			gmodes[g_mode],g_mode)
+	if (g_frz) {
+		printf("\nFrozen values:  ")
+		pr_freeze
+	}
+	printf("\nSector %d\n\n", g_sect)
+	if (g_mode == 2)
+		printf("  Zone defined by (%g %g %g) and (%g %g %g)\n\n",\
+			g_zh0,g_zk0,g_zl0,g_zh1,g_zk1,g_zl1);
+	pa_ub
+	printf("  Azimuthal Reference:\n")
+	printf("                   H K L = %g %g %g\n\n", g_haz,g_kaz,g_laz)
+	pa_mono
+	printf("                  Lambda = %g \n", LAMBDA)
+	printf("\n Cut Points:\n%s\n", fcuts())
+	offp
+'
+def startgeo '
+	printf("\n(setmode)")
+	setmode
+	printf("\n(setsector)")
+	setsector
+	printf("\n(setlat)")
+	setlat
+	printf("\n(setaz)")
+	setaz
+	if (is_kappa) {
+		printf("\n(setkappa)")
+		setkappa
+		printf("\n(setvmode)")
+		setvmode
+	}
+	if (is_picker) {
+		printf("\n(setpic)")
+		setpic
+	}
+'
+def savegeo '
+	printf("H=%g\n",H)
+	printf("K=%g\n",K)
+	printf("L=%g\n",L)
+	printf("LAMBDA=%g\n",LAMBDA)
+	printf("ALPHA=%g\n",ALPHA)
+	printf("BETA=%g\n",BETA)
+	printf("OMEGA=%g\n",OMEGA)
+
+	printf("AZIMUTH=%g\n",AZIMUTH)
+
+
+	printf("F_ALPHA=%g\n",F_ALPHA)
+	printf("F_BETA=%g\n",F_BETA)
+	printf("F_OMEGA=%g\n",F_OMEGA)
+	printf("F_AZIMUTH=%g\n",F_AZIMUTH)
+	printf("F_PHI=%g\n",F_PHI)
+	printf("F_CHI_Z=%g\n",F_CHI_Z)
+	printf("F_PHI_Z=%g\n",F_PHI_Z)
+
+	printf("CUT_AZI=%g\n",CUT_AZI)
+	printf("CUT_TTH=%g\n",CUT_TTH)
+	if (is_omega)
+		printf("CUT_OM=%g\n",CUT_OM)
+	else
+		printf("CUT_TH=%g\n",CUT_TH)
+	printf("CUT_CHI=%g\n",CUT_CHI)
+	printf("CUT_PHI=%g\n",CUT_PHI)
+	if (is_picker) {
+		printf("CUT_CHIR=%g\n",CUT_CHIR)
+		printf("CUT_PHIR=%g\n",CUT_PHIR)
+		printf("g_picker=%g\n",g_picker)
+	}
+	if (is_kappa) {
+		printf("CUT_KTH=%g\n",CUT_KTH)
+		printf("CUT_KAP=%g\n",CUT_KAP)
+		printf("CUT_KPHI=%g\n",CUT_KPHI)
+		printf("g_vmode=%g\n",g_vmode)
+		printf("g_kappa=%g\n",g_kappa)
+	}
+	printf("g_mode=%g\n",g_mode)
+
+	printf("g_sect=%g\n",g_sect)
+	printf("g_frz=%g\n",g_frz)
+	sav_ub
+	printf("g_haz=%g\n",g_haz)
+	printf("g_kaz=%g\n",g_kaz)
+	printf("g_laz=%g\n",g_laz)
+	printf("g_zh0=%g\n",g_zh0)
+	printf("g_zk0=%g\n",g_zk0)
+	printf("g_zl0=%g\n",g_zl0)
+	printf("g_zh1=%g\n",g_zh1)
+	printf("g_zk1=%g\n",g_zk1)
+	printf("g_zl1=%g\n",g_zl1)
+	sav_mono
+'
+def setkappa '
+	if ($# == 1) {
+		_1 = $1
+	} else if ($# == 0) {
+		_1 = getval("\nKappa tilt angle (in degrees)", g_kappa)
+	} else {
+	     eprint "Usage:  setkappa [kappa_tilt]"
+	     exit
+	}
+	gpset _1 g_kappa
+'
+def setvmode '
+	if ($# == 1) {
+		_1 = $1
+	} else if ($# == 0) {
+		_1 = yesno("\nUse vertical mode", g_vmode)
+	} else {
+	     eprint "Usage:  setvmode [1|0]"
+	     exit
+	}
+	gpset _1 g_vmode
+'
+def setpic '
+	if ($# == 1) {
+		_1 = $1
+	} else if ($# == 0)
+		_1 = getval("\nFactor for A[phi] = f * A[chi] + A[phiR]", g_picker)
+	else {
+	     eprint "Usage:  setpic [factor]"
+	     exit
+	}
+	gpset _1 g_picker
+'
+
+# "cz" - calculate zone command
+# prints the values of chi and phi needed to put two vectors in
+# the scattering plane
+def cz '
+	if ($# != 6) {
+		eprint "Usage:  cz h0 k0 l0 h1 k1 l1"
+		exit
+	} 
+	Z[0]=$1; Z[1]=$2; Z[2]=$3; Z[3]=$4; Z[4]=$5; Z[5]=$6
+	calcZ
+	printf("Chi = %g  Phi = %g\n", A[chi], A[phi])
+	waitmove; get_angles; calcHKL
+'
+# "mz" - move zone command
+# calculates the necessary chi and phi, moves there and then
+# goes into the fixed zone mode
+def mz '
+	if ($# != 6) {
+		eprint "Usage:  mz h0 k0 l0 h1 k1 l1"
+		exit
+	} 
+	g_zh0=Z[0]=$1; g_zk0=Z[1]=$2; g_zl0=Z[2]=$3
+	g_zh1=Z[3]=$4; g_zk1=Z[4]=$5; g_zl1=Z[5]=$6
+	waitmove; get_angles; calcZ
+	ifp { fprintf(PRINTER,"\nmv chi %g\nmv phi %g\n", A[chi], A[phi]) }
+	move_em
+	if (g_mode != 2) {
+		setmode 2
+	}
+	freeze
+'
+# "sz" - set zone command
+# calculates the necessary chi and phi and then
+# goes into the fixed zone mode
+def sz '
+	if ($# != 6) {
+		eprint "Usage:  sz h0 k0 l0 h1 k1 l1"
+		exit
+	} 
+	g_zh0=Z[0]=$1; g_zk0=Z[1]=$2; g_zl0=Z[2]=$3
+	g_zh1=Z[3]=$4; g_zk1=Z[4]=$5; g_zl1=Z[5]=$6
+	calcZ
+	printf("Chi = %g  Phi = %g\n", A[chi], A[phi])
+	if (g_mode != 2) {
+		setmode 2
+	}
+	freeze A[chi] A[phi]
+	waitmove; get_angles; calcHKL
+'
+# Macro function to display cut points
+def fcuts() '{
+	local   t
+
+	t = sprintf("      tth   %s  chi  phi", is_omega? " om":"th")
+	if (is_kappa)
+		t = t sprintf("  kth  kap khpi")
+	if (is_picker)
+		t = t sprintf(" chiR phiR")
+	t = t sprintf("\n     %4g %4g %4g %4g",\
+		CUT_TTH,is_omega?CUT_OM:CUT_TH,CUT_CHI,CUT_PHI)
+	if (is_kappa)
+		t = t sprintf(" %4g %4g %4g",CUT_KTH,CUT_KAP,CUT_KPHI)
+	if (is_picker)
+		t = t sprintf(" %4g %4g",CUT_CHIR,CUT_PHIR)
+	return(t)
+}'
+# Macro to set cut points
+def cuts '{
+	local   need
+
+	_1 = CUT_TTH
+	_2 = is_omega? CUT_OM:CUT_TH
+	_3 = CUT_CHI
+	_4 = CUT_PHI
+	need = 4
+	if (is_kappa) {
+		_5 = CUT_KTH
+		_6 = CUT_KAP
+		_7 = CUT_KPHI
+		need = 7
+	}
+	if (is_picker) {
+		_5 = CUT_CHIR
+		_6 = CUT_PHIR
+		need = 6
+	}
+	if ($# == need) {
+		_1 = $1
+		_2 = $2
+		_3 = $3
+		_4 = $4
+		if (is_kappa) {
+			_5 = $5
+			_6 = $6
+			_7 = $7
+		}
+		if (is_picker) {
+			_5 = $5
+			_6 = $6
+		}
+	} else if ($# == 2) {
+		if ("$1" == "tth")
+			_1 = $2
+		else if ("$1" == (is_omega? "om":"th"))
+			_2 = $2
+		else if ("$1" == "chi")
+			_3 = $2
+		else if ("$1" == "phi")
+			_4 = $2
+		else if ("$1" == "kth")
+			_5 = $2
+		else if ("$1" == "kap")
+			_6 = $2
+		else if ("$1" == "kphi")
+			_7 = $2
+		else if ("$1" == "chiR")
+			_5 = $2
+		else if ("$1" == "phiR")
+			_6 = $2
+		else {
+			eprint "No cut point for angle " "$1"
+			exit
+		}
+	} else if ($# == 0) {
+		print "\n\
+Enter cut point x for each angle.  Motion of that\n\
+circle is restricted to x and x+360.  Thus, if cut\n\
+point is -180, circle will go long way around to\n\
+travel from -175 to +175.\n"
+		_1 = getval("\nCut for tth", CUT_TTH)
+		if (is_omega)
+			_2 = getval("Cut for om", CUT_OM)
+		else
+			_2 = getval("Cut for th", CUT_TH)
+		_3 = getval("Cut for chi", CUT_CHI)
+		_4 = getval("Cut for phi", CUT_PHI)
+		if (is_kappa) {
+			_5 = getval("Cut for kth", CUT_KTH)
+			_6 = getval("Cut for kap", CUT_KAP)
+			_7 = getval("Cut for kphi", CUT_KPHI)
+		}
+		if (is_picker) {
+			_5 = getval("Cut for chiR", CUT_CHIR)
+			_6 = getval("Cut for phiR", CUT_PHIR)
+		}
+	} else {
+		eprintf("Usage:  cuts [angle cut]|[(all %d cuts)]\n",\
+			is_kappa? 7:4)
+		exit
+	}
+	gpset _1 CUT_TTH
+	if (is_omega)
+		gpset _2 CUT_OM
+	else
+		gpset _2 CUT_TH
+	gpset _3 CUT_CHI
+	gpset _4 CUT_PHI
+	if (is_kappa) {
+		gpset _5 CUT_KTH
+		gpset _6 CUT_KAP
+		gpset _7 CUT_KPHI
+	}
+	if (is_picker) {
+		gpset _5 CUT_CHIR
+		gpset _6 CUT_PHIR
+	}
+	printf("\nCurrent cuts:\n%s\n", fcuts())
+}'
+
+if (whatis("abscan")&2)
+	undef abscan
+if (whatis("abmesh")&2)
+	undef abmesh
+
+#
+# Scan azimuthal angle
+def aziscan '
+	if ($# != 4) {
+		eprint "Usage:  aziscan azi_start azi_finish intervals time"
+		exit
+	}
+	{ _s1 = $1; _f1 = $2; _n1 = int($3); _ctime = $4; }
+
+	if (_n1 <= 0) {
+		eprint "Intervals <= 0"
+		exit
+	}
+	HEADING = sprintf("aziscan %g %g %g %g", $1,$2,$3,$4)
+	_d1 = (_f1 - _s1) / _n1++
+
+	if (g_mode != 4) {
+		setmode 4
+	}
+	if (g_frz) {
+		unfreeze
+	}
+	AZIMUTH=_f1
+	calcA; _bad_lim=0; _hkl_lim
+	if (_bad_lim) {
+		eprintf("(AZIMUTH = %g)\n",AZIMUTH)
+		exit
+	}
+	if (_pre_chk) {
+		local i
+		for (i=0;i<_n1;i++) {
+			AZIMUTH = _s1 + i*_d1
+			calcA
+			_bad_lim = 0
+			_hkl_lim
+			if (_bad_lim) {
+				eprintf("(AZIMUTH = %g)\n",AZIMUTH)
+				exit
+			}
+		}
+	}
+	_cols=1
+	X_L = "AZIMUTH"; _sx = _s1; _fx = _f1
+	Y_L = cnt_name(DET)
+	_stype = 2
+	FPRNT="AZIMUTH  "
+	PPRNT=sprintf("%10s ", "AZIMUTH")
+	{
+	 local i
+	 for (i=0;i<_numgeo;i++)
+		PPRNT=sprintf("%s%8.8s ",PPRNT,motor_name(mA[i]))
+	}
+	VPRNT=sprintf("%10s ","AZIMUTH")
+	scan_head
+	def _scan_on \'
+	 for (; NPTS < _n1; NPTS++) {
+		local i
+		AZIMUTH = _s1 + NPTS*_d1
+		get_angles; calcA
+		scan_move
+		FPRNT=sprintf("%g ",AZIMUTH)
+		PPRNT=sprintf("%10.5g ",AZIMUTH)
+		for (i=0;i<_numgeo;i++)
+			PPRNT=sprintf("%s%8.4f ",PPRNT,A[mA[i]])
+		VPRNT=sprintf("%10.5g ",AZIMUTH)
+		scan_loop
+		scan_data(NPTS, AZIMUTH)
+		scan_plot
+	 }
+	 scan_tail
+	\'
+	_scan_on
+'
+
+# Strings describing geometry modes
+global gmodes
+
+gmodes[0] = "Omega equals zero"
+gmodes[1] = "Omega fixed"
+gmodes[2] = "Zone (Chi and Phi fixed)"
+gmodes[3] = "Phi fixed (Three-circle)"
+gmodes[4] = "Azimuth fixed"
+gmodes[5] = "Alpha fixed"
+gmodes[6] = "Beta fixed"
+
+constant MODES 6
+
+# Coordinate names
+def H         'Q[0]'
+def K         'Q[1]'
+def L         'Q[2]'
+def LAMBDA    'Q[3]'
+def ALPHA     'Q[4]'
+def BETA      'Q[5]'
+def OMEGA     'Q[6]'
+
+def AZIMUTH   'Q[7]'
+
+
+def F_ALPHA   'Q[8]'    # Frozen values
+def F_BETA    'Q[9]'
+def F_OMEGA   'Q[10]'
+def F_AZIMUTH 'Q[11]'
+def F_PHI     'Q[12]'
+def F_CHI_Z   'Q[13]'
+def F_PHI_Z   'Q[14]'
+
+def CUT_AZI   'Q[15]'   # azimuthal cut-point flag
+
+def CUT_TTH   'Q[16]'
+def CUT_TH    'Q[17]'   # theta/omega cut point
+def CUT_OM    'CUT_TH'
+def CUT_CHI   'Q[18]'   # chi cut point
+def CUT_PHI   'Q[19]'   # phi cut point
+def CUT_KTH   'Q[20]'   # theta cut point
+def CUT_KAP   'Q[21]'   # kap cut point
+def CUT_KPHI  'Q[22]'   # phi cut point
+def CUT_CHIR  'Q[23]'
+def CUT_PHIR  'Q[24]'
+
+# Calc calls
+def calcA   'calc(1)'
+def calcHKL 'calc(2)'
+def calcZ   'calc(5)'
+def calcP_fromR 'calc(8, 0)'    # find pseudo from real motors
+def calcR_fromP 'calc(8, 1)'    # find real from pseudo motors
+
+# Geometry parameters
+def g_mode   'G[0]'     # spectrometer mode
+def g_sect   'G[1]'     # sector
+def g_frz    'G[2]'     # freeze
+def g_haz    'G[3]'     # azimuthal reference
+def g_kaz    'G[4]'
+def g_laz    'G[5]'
+def g_zh0    'G[6]'     # zone vec 0
+def g_zk0    'G[7]'
+def g_zl0    'G[8]'
+def g_zh1    'G[9]'     # zone vec 1
+def g_zk1    'G[10]'
+def g_zl1    'G[11]'
+
+def g_kappa  'G[12]'    # angle of kappa tilt (in degrees)
+def g_vmode  'G[13]'    # set if vertical mode
+
+def g_picker 'G[14]'    # picker-mode factor
+
+# Redefine some UB parameters for user's convenience
+def tth0     'g_u00'
+def th0      'g_u01'
+def om0      'g_u01'
+def chi0     'g_u02'
+def phi0     'g_u03'
+
+def tth1     'g_u10'
+def th1      'g_u11'
+def om1      'g_u11'
+def chi1     'g_u12'
+def phi1     'g_u13'
+
+
+# Set defaults on "fresh" start
+if (FRESH) {
+	LAMBDA = 1.54
+
+	# Set azimuth
+	g_haz=0
+	g_kaz=0
+	g_laz=1
+
+	# Set cuts
+	CUT_TTH=-180
+	CUT_TH=-180
+	CUT_CHI=-180
+	CUT_PHI=-180
+	CUT_KTH=-180
+	CUT_KAP=-180
+	CUT_KPHI=-180
+	CUT_CHIR=-180
+	CUT_PHIR=-180
+
+	# Kappa tilt
+	g_kappa=50
+
+	# Picker factor
+	g_picker=.1
+}
+
+# Do not remove this line -- it keeps the parser from waiting for an "else".
+#++++ install source file:  /home/specadm/spec5.01.01/macros/ub.mac
+#
+#  @(#)ub.mac	5.2  04/08/01 CSS
+#
+#  "Spec" Release 5
+#
+#  Copyright (c) 1991,1992,1993,1995,1997,1998,1999,2001
+#  by Certified Scientific Software.
+#  All rights reserved.
+#  Copyrighted as an unpublished work.
+#
+#########################################################################
+#
+
+# Set lattice parameters
+def setlat '{
+	local user_ub
+
+	user_ub = USER_UB
+	if ($# == 6) {
+		_1 = $1; _2 = $2; _3 = $3; _4 = $4; _5 = $5; _6 = $6
+	} else if ($# == 0) {
+		print "\nEnter real space lattice parameters:"
+		_1 = getval(" Lattice a", g_aa)
+		_2 = getval(" Lattice b", g_bb)
+		_3 = getval(" Lattice c", g_cc)
+		_4 = getval(" Lattice alpha", g_al)
+		_5 = getval(" Lattice beta", g_be)
+		_6 = getval(" Lattice gamma", g_ga)
+	} else {
+		print "Usage:  setlat  or  setlat a b c alpha beta gamma"
+		exit
+	}
+	gpset _1 g_aa
+	gpset _2 g_bb
+	gpset _3 g_cc
+	gpset _4 g_al
+	gpset _5 g_be
+	gpset _6 g_ga
+	calcR
+	if (!user_ub)
+		calcG
+}'
+# Set reciprocal lattice parameters
+def setrlat '{
+	local user_ub
+
+	user_ub = USER_UB
+	if ($# == 6) {
+		_1 = $1; _2 = $2; _3 = $3; _4 = $4; _5 = $5; _6 = $6
+	} else if ($# == 0) {
+		print "\nEnter reciprocal space lattice parameters:"
+		_1 = getval(" Lattice a_star", g_aa_s)
+		_2 = getval(" Lattice b_star", g_bb_s)
+		_3 = getval(" Lattice c_star", g_cc_s)
+		_4 = getval(" Lattice alpha_star", g_al_s)
+		_5 = getval(" Lattice beta_star", g_be_s)
+		_6 = getval(" Lattice gamma_star", g_ga_s)
+	} else {
+		print \
+	     "Usage:  setrlat  or  setrlat a_* b_* c_* alpha_* beta_* gamma_*"
+		exit
+	}
+	gpset _1 g_aa_s
+	gpset _2 g_bb_s
+	gpset _3 g_cc_s
+	gpset _4 g_al_s
+	gpset _5 g_be_s
+	gpset _6 g_ga_s
+	calcD
+	if (!user_ub)
+		calcG
+}'
+def pa_ub '
+	{
+	  local i s t u
+
+	  printf("  Primary Reflection (at lambda %g):\n", g_lambda0)
+	  for (i=0, s=t=u=""; i<_numgeo; i++) {
+		s=sprintf("%s%s ", s, motor_mne(mA[i]))
+		t=sprintf("%s%g ", t, U[18+i])  # g_u00 ...
+		u=sprintf("%s%g ", u, U[24+i])  # g_u10 ...
+	  }
+	  printf("%25s= %s\n", s, t)
+	  printf("                   H K L = %g %g %g\n\n", g_h0,g_k0,g_l0)
+	  printf("  Secondary Reflection (at lambda %g):\n", g_lambda1)
+	  printf("%25s= %s\n", s, u)
+	  printf("                   H K L = %g %g %g\n\n", g_h1,g_k1,g_l1)
+	}
+	printf("  Lattice Constants (lengths / angles):\n")
+	printf("              real space = %.4g %.4g %.4g / %.4g %.4g %.4g\n", \
+				g_aa,g_bb,g_cc, g_al,g_be,g_ga)
+	printf("        reciprocal space = %.4g %.4g %.4g / %.4g %.4g %.4g\n\n", \
+				g_aa_s,g_bb_s,g_cc_s, g_al_s,g_be_s,g_ga_s)
+
+'
+def sav_ub '
+	printf("g_aa=%g\n",g_aa)
+	printf("g_bb=%g\n",g_bb)
+	printf("g_cc=%g\n",g_cc)
+	printf("g_al=%g\n",g_al)
+	printf("g_be=%g\n",g_be)
+	printf("g_ga=%g\n",g_ga)
+
+	printf("g_aa_s=%g\n",g_aa_s)
+	printf("g_bb_s=%g\n",g_bb_s)
+	printf("g_cc_s=%g\n",g_cc_s)
+	printf("g_al_s=%g\n",g_al_s)
+	printf("g_be_s=%g\n",g_be_s)
+	printf("g_ga_s=%g\n",g_ga_s)
+
+	printf("g_u00=%g\n",g_u00)
+	printf("g_u01=%g\n",g_u01)
+	printf("g_u02=%g\n",g_u02)
+	if (_numgeo > 3)
+		printf("g_u03=%g\n",g_u03)
+	if (_numgeo > 4)
+		printf("g_u04=%g\n",g_u04)
+	if (_numgeo > 5)
+		printf("g_u05=%g\n",g_u05)
+
+	printf("g_u10=%g\n",g_u10)
+	printf("g_u11=%g\n",g_u11)
+	printf("g_u12=%g\n",g_u12)
+	if (_numgeo > 3)
+		printf("g_u13=%g\n",g_u13)
+	if (_numgeo > 4)
+		printf("g_u14=%g\n",g_u14)
+	if (_numgeo > 5)
+		printf("g_u15=%g\n",g_u15)
+
+	printf("g_h0=%g\n",g_h0)
+	printf("g_k0=%g\n",g_k0)
+	printf("g_l0=%g\n",g_l0)
+	printf("g_h1=%g\n",g_h1)
+	printf("g_k1=%g\n",g_k1)
+	printf("g_l1=%g\n",g_l1)
+
+	printf("g_lambda0=%g\n", g_lambda0)
+	printf("g_lambda1=%g\n", g_lambda1)
+
+	if (USER_UB)
+		for(i=0;i<9;i++) printf("UB[%d]=%.15g\n",i,UB[i])
+	else
+		printf("calcG\n")
+'
+# Prints the UB matrix on the screen
+def showUB '{
+	printf("Orientation Matrix by Row:\n\n")
+	printf("Row 1: %10.5f %10.5f %10.5f\n",UB[0],UB[3],UB[6])
+	printf("Row 2: %10.5f %10.5f %10.5f\n",UB[1],UB[4],UB[7])
+	printf("Row 3: %10.5f %10.5f %10.5f\n",UB[2],UB[5],UB[8])
+}'
+
+# Asks user to enter the Orientation matrix in the UB array
+def enterUB '{
+	local x
+	print "Enter Orientation Matrix by Rows:"
+	x = getval(" Row 1:",sprintf("%f %f %f",UB[0],UB[3],UB[6]))
+	sscanf(x,"%f %f %f",UB[0],UB[3],UB[6])
+	x = getval(" Row 2:",sprintf("%f %f %f",UB[1],UB[4],UB[7]))
+	sscanf(x,"%f %f %f",UB[1],UB[4],UB[7])
+	x = getval(" Row 3:",sprintf("%f %f %f",UB[2],UB[5],UB[8]))
+	sscanf(x,"%f %f %f",UB[2],UB[5],UB[8])
+}'
+
+def or_swap '{
+	local i t
+	comment "Orientation vectors swapped"
+	for (i=0;i<_numgeo;i++) {
+		# g_u00 ... g_u10 ...
+		t = U[18+i]; U[18+i] = U[24+i]; U[24+i] = t
+	}
+	for (i=0;i<3;i++) {
+		# g_h0 ... g_h1 ...
+		t = U[12+i]; U[12+i] = U[15+i]; U[15+i] = t
+	}
+	t = g_lambda0; g_lambda0 = g_lambda1; g_lambda1 = t
+	calcG
+}'
+
+# set orientation matrix primary reflection
+def or0 '
+	if ($# == 3) {
+		_1 = $1; _2 = $2; _3 = $3
+	} else if ($# == 0) {
+		print "\nEnter primary-reflection HKL coordinates:"
+		_1 = getval(" H", g_h0)
+		_2 = getval(" K", g_k0)
+		_3 = getval(" L", g_l0)
+	} else {
+		print "Usage:  or0  or  or0 H K L"
+		exit
+	}
+	waitmove; get_angles
+	gpset _1       g_h0
+	gpset _2       g_k0
+	gpset _3       g_l0
+	gpset A[mA[0]] g_u00
+	gpset A[mA[1]] g_u01
+	gpset A[mA[2]] g_u02
+	if (_numgeo > 3) { gpset A[mA[3]] g_u03 }
+	if (_numgeo > 4) { gpset A[mA[4]] g_u04 }
+	if (_numgeo > 5) { gpset A[mA[5]] g_u05 }
+	gpset LAMBDA g_lambda0
+	calcG
+'
+def setor0 '{
+	print "\nEnter primary-reflection angles:"
+	_4 = getval(sprintf(" %s", motor_name(mA[0])), g_u00)
+	_5 = getval(sprintf(" %s", motor_name(mA[1])), g_u01)
+	_6 = getval(sprintf(" %s", motor_name(mA[2])), g_u02)
+	if (_numgeo > 3)
+		_7 = getval(sprintf(" %s", motor_name(mA[3])), g_u03)
+	if (_numgeo > 4)
+		_8 = getval(sprintf(" %s", motor_name(mA[4])), g_u04)
+	if (_numgeo > 5)
+		_9 = getval(sprintf(" %s", motor_name(mA[5])), g_u05)
+	print "\nEnter primary-reflection HKL coordinates:"
+	_1 = getval(" H", g_h0)
+	_2 = getval(" K", g_k0)
+	_3 = getval(" L", g_l0)
+	gpset _1 g_h0
+	gpset _2 g_k0
+	gpset _3 g_l0
+	gpset _4 g_u00
+	gpset _5 g_u01
+	gpset _6 g_u02
+	if (_numgeo > 3) { gpset _7 g_u03 }
+	if (_numgeo > 4) { gpset _8 g_u04 }
+	if (_numgeo > 5) { gpset _9 g_u05 }
+	gpset LAMBDA g_lambda0
+	calcG
+}'
+
+# set orientation matrix secondary reflection
+def or1 '
+	if ($# == 3) {
+		_1 = $1; _2 = $2; _3 = $3
+	} else if ($# == 0) {
+		print "\nEnter secondary-reflection HKL coordinates:"
+		_1 = getval(" H", g_h1)
+		_2 = getval(" K", g_k1)
+		_3 = getval(" L", g_l1)
+	} else {
+		print "Usage:  or1  or  or1 H K L"
+		exit
+	}
+	waitmove; get_angles
+	gpset _1       g_h1
+	gpset _2       g_k1
+	gpset _3       g_l1
+	gpset A[mA[0]] g_u10
+	gpset A[mA[1]] g_u11
+	gpset A[mA[2]] g_u12
+	if (_numgeo > 3) { gpset A[mA[3]] g_u13 }
+	if (_numgeo > 4) { gpset A[mA[4]] g_u14 }
+	if (_numgeo > 5) { gpset A[mA[5]] g_u15 }
+	gpset LAMBDA g_lambda1
+	calcG
+'
+def setor1 '{
+	print "\nEnter secondary-reflection angles:"
+	_4 = getval(sprintf(" %s", motor_name(mA[0])), g_u10)
+	_5 = getval(sprintf(" %s", motor_name(mA[1])), g_u11)
+	_6 = getval(sprintf(" %s", motor_name(mA[2])), g_u12)
+	if (_numgeo > 3)
+		_7 = getval(sprintf(" %s", motor_name(mA[3])), g_u13)
+	if (_numgeo > 4)
+		_8 = getval(sprintf(" %s", motor_name(mA[4])), g_u14)
+	if (_numgeo > 5)
+		_9 = getval(sprintf(" %s", motor_name(mA[5])), g_u15)
+	print "\nEnter secondary-reflection HKL coordinates:"
+	_1 = getval(" H", g_h1)
+	_2 = getval(" K", g_k1)
+	_3 = getval(" L", g_l1)
+	gpset _1 g_h1
+	gpset _2 g_k1
+	gpset _3 g_l1
+	gpset _4 g_u10
+	gpset _5 g_u11
+	gpset _6 g_u12
+	if (_numgeo > 3) { gpset _7 g_u13 }
+	if (_numgeo > 4) { gpset _8 g_u14 }
+	if (_numgeo > 5) { gpset _9 g_u15 }
+	gpset LAMBDA g_lambda1
+	calcG
+}'
+
+# Macros for fitting UB using a series of reflections
+# "REFLEX" holds the name of the file to be used to store the reflection data
+#
+global REFLEX
+def reflex_beg '{
+	if ("$1" == "0") {
+		if (REFLEX == "")
+			REFLEX = "reflex"
+		REFLEX = getsval("Reflections file", REFLEX)
+	} else
+		REFLEX = "$1"
+
+	if (open(REFLEX))
+		exit
+	close(REFLEX)
+	if (file_info(REFLEX, "-s"))
+		unix(sprintf("mv %s %s.bak", REFLEX, REFLEX))
+	fprintf(REFLEX,"# %s\n\n_begUB\n\n",date())
+}'
+def reflex_end '
+	fprintf(REFLEX,"_fitUB\n")
+	printf("Type \"qdo %s\" to calculate new orientation matrix.\n",REFLEX)
+'
+def reflex '
+	if ($# != 3) {
+		print "Usage:  reflex H K L"
+		exit
+	}
+	if (REFLEX == "") {
+		REFLEX = getsval("Reflections file", "reflex")
+		if (REFLEX == "")
+			exit
+	}
+	waitmove; get_angles; calcHKL
+	fprintf(REFLEX,"H = %g;  K = %g;  L = %g\n",$1,$2,$3)
+	{
+	  local i
+
+	  for (i=0; i<_numgeo; i++)
+		fprintf(REFLEX,"A[%s]=%9.4f;  ",motor_mne(mA[i]),A[mA[i]])
+	  fprintf(REFLEX,"\n")
+	}
+	fprintf(REFLEX,"# counts = %g\n", S[DET])
+	fprintf(REFLEX,"_addUB\n\n")
+'
+
+def calcG       'calc(4)'
+def USER_UB     'calc(4,1)'
+def calcL       'calc(13)'  # calculate lattice parameters from UB
+def calcD       'calc(7,0)' # calculate direct from recip lattice params
+def calcR       'calc(7,1)' # calculate recip from direct lattice params
+def _begUB      'calc(10)'  # initialize sums for fitting UB
+def _addUB      'calc(11)'  # add a reflection to fitting sums
+def _fitUB      'calc(12)'  # fit UB
+
+def g_aa        'U[0]'  # a lattice constant (real space)
+def g_bb        'U[1]'  # b lattice constant (real space)
+def g_cc        'U[2]'  # c lattice constant (real space)
+def g_al        'U[3]'  # alpha lattice angle (real space)
+def g_be        'U[4]'  # beta  lattice angle (real space)
+def g_ga        'U[5]'  # gamma lattice angle (real space)
+
+def g_aa_s      'U[6]'  # a lattice constant (reciprocal space)
+def g_bb_s      'U[7]'  # b lattice constant (reciprocal space)
+def g_cc_s      'U[8]'  # c lattice constant (reciprocal space)
+def g_al_s      'U[9]'  # alpha lattice angle (reciprocal space)
+def g_be_s      'U[10]' # beta  lattice angle (reciprocal space)
+def g_ga_s      'U[11]' # gamma lattice angle (reciprocal space)
+
+def g_h0        'U[12]' # H of primary reflection
+def g_k0        'U[13]' # K of primary reflection
+def g_l0        'U[14]' # L of primary reflection
+def g_h1        'U[15]' # H of secondary reflection
+def g_k1        'U[16]' # K of secondary reflection
+def g_l1        'U[17]' # L of secondary reflection
+
+def g_u00       'U[18]' # angles of primary reflection
+def g_u01       'U[19]'
+def g_u02       'U[20]'
+def g_u03       'U[21]'
+def g_u04       'U[22]'
+def g_u05       'U[23]'
+
+def g_u10       'U[24]' # angles of secondary reflection
+def g_u11       'U[25]'
+def g_u12       'U[26]'
+def g_u13       'U[27]'
+def g_u14       'U[28]'
+def g_u15       'U[29]'
+
+def g_lambda0   'U[30]' # lambda when or0 was set
+def g_lambda1   'U[31]' # lambda when or1 was set
+
+# geo_ub_default can have content added for particular geometries
+cdef("geo_ub_default", "", "ub.mac")
+
+# Set defaults on "fresh" start
+if (FRESH) {
+	printf("Warning:  Using default lattice constants.\n")
+	# Set some default lattice constants
+	g_aa=g_bb=g_cc=1.54
+	g_al=g_be=g_ga=90
+	# Set some default orientation reflections
+	g_u00=60
+	g_u01=30
+	g_u02=0
+	g_u03=0
+	g_u04=0
+	g_u05=0
+	g_h0=1
+	g_k0=0
+	g_l0=0
+	g_u10=60
+	g_u11=30
+	g_u12=0
+	if ((whatis("g_config")&0xFF) == 2 && g_config == 0)
+		g_u13=90
+	else
+		g_u13=-90
+	g_u14=0
+	g_u15=0
+	g_h1=0
+	g_k1=1
+	g_l1=0
+	g_lambda0=g_lambda1=1.54
+	geo_ub_default
+	calcG
+	print
+}
+
+calcR

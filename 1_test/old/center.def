@@ -1,0 +1,35 @@
+# AlphaScan - Scans incident angle.
+def Center '
+      local num_mots start_int final_int time
+	if ($# != 4 ) {
+	 eprint "Usage: Center num_mot start_int final_int time \n "
+       exit
+	} 
+         
+	 num_mots = $1 ;
+       start_int = $2 ;
+       final_int = int($3) ; 
+       time = $4  ;
+
+	if (num_mots < 1) {
+		eprint "Number of motors < 1"
+		exit
+	} 
+	
+      
+      local j num_loops del width
+
+      num_loops = 10      
+      del = (start_int - final_int)/num_loops
+
+      for (j=0;j<num_loops;j++){
+
+        width = start_int - (j)*del;
+ 
+        if (num_mots >=1) center keta width;
+        if (num_mots >=2) center kap width;
+        if (num_mots >=3) center kphi width;
+        if (num_mots >=4) center mu width;
+          
+      }
+'

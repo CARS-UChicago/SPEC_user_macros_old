@@ -1,0 +1,83 @@
+####################################################################
+# Todo
+# - use the SC_ANAL macro to add atten, chose widths etc....
+#
+####################################################################
+## centering scan 
+def center '{
+	if ($# != 2) {
+      eprint "Usage:  center motor width"	
+      exit
+	} 
+
+      local my_delta _pos_0 _pos_low _pos_high    
+      my_delta = $2
+      _pos_0 = A[$1]       
+   
+	lup $1 -my_delta/2 my_delta/2 20 .2
+	print "\n Center = ", CEN
+      
+      _pos_low = _pos_0 - my_delta/2 + 3*my_delta/20
+      _pos_high = _pos_0 + my_delta/2 - 3*my_delta/20
+
+      if (CEN > _pos_low | CEN < _pos_high){
+         print "\n Moving to Center"
+	   mv $1 CEN
+      } else {
+         print "\n Motor not moved"
+      }
+}'
+####################################################################
+
+####################################################################
+# Peak - Iterate on center.
+def Peak '{
+      local num_mots start_width num_loops
+	if ($# != 3 ) {
+	 eprint "Usage: Peak num_mot start_width num_loops \n "
+       exit
+	} 
+         
+	 num_mots =  $1 ;
+       start_width = $2 ;
+       num_loops = $3 ; 
+
+	if (num_mots < 1) {
+		eprint "Number of motors < 1"
+		exit
+	} 
+	
+      local j k width width_0
+
+# note should be using the peak FWHM to determine what widths to use
+# ie not all the motors should have the same widths! also need to include auto-attenuator
+
+      for (j=0;j<num_loops;j++){
+        
+        if(j<1){
+           width = start_width
+           width_0 = width
+        } else {
+           width = width_0/2
+        }
+
+        if (width < 0.01) {
+	   eprint "Width too small, im bailin out\n "
+         exit
+	  } 
+
+        if (num_mots >=1) center keta width_0;
+        if (num_mots >=2) center kap width_0;
+        if (num_mots >=3) center kphi width_0;
+        if (num_mots >=4) center mu width_0;
+
+        
+        if (num_mots >=1) center keta width;
+        if (num_mots >=2) center kap width;
+        if (num_mots >=3) center kphi width;
+        if (num_mots >=4) center mu width;
+
+        width_0 = width              
+
+      }
+}'

@@ -1,0 +1,53 @@
+############################################################################
+############################################################################
+## site_startup.mac
+## This file is read on a fresh start of spec 
+##     ( either ">psic -f" or ">kappa -f" )
+## Use this to call other macro files during a fresh start  
+##
+############################################################################
+############################################################################
+
+## Create global for user macro directory
+global USERMAC
+USERMAC = "/home/specadm/user_macros" 
+
+## run the geom independent user macro file
+# this file should be used to add/replace stuff in standard.mac
+t = USERMAC "/site_standard.mac"
+qdofile(t)
+
+
+## set up for point scans by default 
+t = USERMAC "/point_scans1.mac"
+qdofile(t)
+
+## set up for traj scans by default 
+#t = USERMAC "/traj_scans1.mac"
+#qdofile(t)
+
+## run the geom dependent user macro file
+# note this should go last since there may be
+# some stuff in the geom dpendant files which 
+# redefines the standard macros
+t = USERMAC "/" SPEC "/" SPEC "_user.mac"
+qdofile(t)
+
+t = ""
+
+## define a macro for CLEAN start
+def CLEAN_START '{
+      local t
+      t = USERMAC "/" SPEC "/" SPEC "_clean_start.mac" 
+      qdofile(t)
+}'
+p "Run CLEAN_START to set default parameters"
+
+## define a macro to rerun this file
+def GSE_MACROS '{
+      local t
+      t = USERMAC  "/site_startup.mac" 
+      qdofile(t)
+}'
+p "Run GSE_MACROS to re-read macro defs"
+

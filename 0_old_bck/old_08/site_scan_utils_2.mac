@@ -1,0 +1,457 @@
+
+##########################################################################################
+##########################################################################################
+#  Analysis Stuff                                                                        #
+##########################################################################################
+##########################################################################################
+
+##########################################################################################
+# ToDo
+# - add integration option for point scans?
+# - make a macro for checking scan range vs peak width
+# - option for interpolating in data averaging
+###################################################################################
+
+
+###################################################################################
+# analyze the scan data
+# Analysis and plotting macro globals
+#
+# do we want plots of avg data
+global SC_PLOT_AVE
+       SC_PLOT_AVE = TRUE;
+global SC_PLOT_PAUSE
+       SC_PLOT_PAUSE = FALSE;
+
+#
+# These are no longer globals, the macro returns the summary array
+#
+# SC_ANAL_BAD                = summary_data_array[0][0];
+# SC_ANAL_Y_MAX              = summary_data_array[0][1];
+# SC_ANAL_X_AT_Y_MAX         = summary_data_array[0][2];
+# SC_ANAL_FWHM               = summary_data_array[0][3];
+# SC_ANAL_CFWHM              = summary_data_array[0][4];
+# SC_ANAL_I                  = summary_data_array[0][7];
+# SC_ANAL_PRSD               = summary_data_array[0][8];
+# SC_ANAL_Itot               = summary_data_array[0][7];
+# SC_ANAL_BGR                = summary_data_array[0][8];
+# SC_ANAL_AVE_BGR            = summary_data_array[0][9];
+#
+# SC_ANAL_BAD =  0   is a good scan (or avg is good)
+# SC_ANAL_BAD =  1   poor stats, repeat same scan and avg
+# SC_ANAL_BAD =  5   problem calculating the stats ... dont avg
+#
+###################################################################################
+# Not this function wants an array of x values and an array of y values
+# The arrays should have scan points as rows 
+# The x and y dims must match
+# nave is just for the plotting thing
+#
+def SC_ANAL( sc_x_array, sc_y_array, num_pts, prsd_cutoff, nave) '{
+
+        local sc_nrows, sc_ncols, idx, test_int; 
+       
+        # declare array, this should initialize it to all zeros
+        local array summary_data_array[1][10];
+        summary_data_array = 0;
+
+        sc_nrows = array_op("rows",sc_x_array); 
+        if( sc_nrows != array_op("rows",sc_y_array) ) {
+            print "Error array mismatch"
+            summary_data_array[0][0] = 5.0;
+            return(summary_data_array);
+        }
+
+        sc_ncols = array_op("cols",sc_x_array);
+        if( sc_ncols != array_op("cols",sc_y_array) ) {
+            print "Error array mismatch"
+            summary_data_array[0][0] = 5.0;
+            return(summary_data_array);
+        }
+
+        # now get some data
+        idx = array_op("rmax",sc_y_array[0:num_pts-1] );
+        summary_data_array[0][1] = sc_y_array[idx];
+        summary_data_array[0][2] = sc_x_array[idx];
+        summary_data_array[0][3] = array_op("fwhm", sc_x_array[0:num_pts-1] ,sc_y_array[0:num_pts-1]);
+        summary_data_array[0][4] = array_op("cfwhm",sc_x_array[0:num_pts-1] ,sc_y_array[0:num_pts-1]);
+p "enter int"
+p array_op("rows",sc_y_array)
+p array_op("cols",sc_y_array)
+p array_op("rows",sc_x_array)
+p array_op("cols",sc_x_array)
+
+        # do integration, use 5 bgr points
+        test_int = SC_INT( sc_x_array[0:num_pts-1][0], sc_y_array[0:num_pts-1][0], num_pts, 5);
+p "leave int"
+p array_op("rows",sc_y_array)
+p array_op("cols",sc_y_array)
+p array_op("rows",sc_x_array)
+p array_op("cols",sc_x_array)
+
+        if (test_int == 1){                           # int ok
+        p   summary_data_array[0][5] = SC_INT_I;
+        p   summary_data_array[0][6] = SC_INT_PRSD;
+        p   summary_data_array[0][7] = SC_INT_Itot;
+        p   summary_data_array[0][8] = SC_INT_BGR;
+        p   summary_data_array[0][9] = SC_INT_AVE_BGR;
+         } else { 
+           summary_data_array[0][0] = 5.0;       # int failed
+           return(summary_data_array); 
+        }
+
+        # see if the avg data passed the stats test
+        if ( (SC_INT_PRSD < prsd_cutoff) && (SC_INT_I > 0) ) {
+            summary_data_array[0][0] = 0;
+        } else {
+            summary_data_array[0][0] = 1;      
+        }
+
+ p "get numbers"
+ p array_op("rows",sc_y_array);
+ p array_op("cols",sc_y_array);
+ p array_op("rows",sc_x_array);
+ p array_op("cols",sc_x_array);
+ #p sc_x_array
+ #p num_pts
+ # array_plot(sc_x_array[0:num_pts-1][0],sc_y_array[0:num_pts-1][0]) 
+
+        if(SC_PLOT_AVE){
+           local xx
+           # initialize the plot and plot the avg data
+           SC_ANAL_INIT_PLOT( nave, summary_data_array ) 
+           array_plot(sc_x_array[0:num_pts-1][0],sc_y_array[0:num_pts-1][0]) 
+           if ( SC_PLOT_PAUSE ){ 
+               xx = getval("#In SC_PLOT_PAUSE mode, hit any key to cont","y");
+           }
+        }
+p "after plot"
+#p summary_data_array
+# return the info
+ return(summary_data_array);
+
+}'
+
+
+####################################################################
+# Initialize the plot for SC_ANAL, 
+# this is similiar to the splot macro in standard.mac
+####################################################################
+def SC_ANAL_INIT_PLOT( nscans, summary_data ) '{
+        local title, y_label, plot_str 
+
+        # set up the plot window to plot the averaged data
+        if (PLOT_MODE&128) {
+		plot_cntl(sprintf("colors=%s",splot_col))
+		plot_cntl("open")
+	  }
+	  plot_cntl("erase")
+	  plot_cntl(PLOT_MODE&8? "xexact":"-xexact")
+	  plot_cntl(PLOT_MODE&32? "ylog":"-ylog")
+	  plot_cntl(PLOT_MODE&256? "-dots":"dots")
+	  plot_cntl(PLOT_MODE&512? "-lines":"lines")
+	  plot_cntl(PLOT_MODE&1024? "-ebars":"ebars")
+
+        # plot range
+	  plot_range("auto","auto","auto","auto")
+
+        # title
+        if(IS_ROD_SCAN){
+        plot_str = sprintf("%s, nave=%d, last scan=%d, BAD=%d", \
+                            RS_SCAN_TITLE,nscans, SCAN_N, summary_data[0][0]);
+	  plot_move(10,0,plot_str)
+        #printf("%s\n",plot_str);
+        }
+
+        # y-axis label
+        plot_str = sprintf("Tot(%s)", cnt_mne(DET));
+	  plot_move(0,0,plot_str)
+
+        # x-axis label
+	  plot_move(0,-1,sprintf("%.8s", pl_xl))
+
+        # data from SC_ANAL
+        plot_str = sprintf("Y_max=%g, at X=%g, fwhm=%g, cfwhm=%g ", \
+                            summary_data[0][1], summary_data[0][2], \
+                            summary_data[0][3], summary_data[0][4] ) 
+	  plot_move(10,1,plot_str);
+        #printf("%s\n",plot_str);
+
+        # more data from SC_ANAL
+        plot_str = sprintf("I=%g, prsd=%g, Itot=%g, bgr=%g, ave_bgr=%g", \
+                             summary_data[0][5], summary_data[0][6],      \
+                             summary_data[0][7], summary_data[0][8], \
+                             summary_data[0][9]) 
+	  plot_move(10,2,plot_str);
+        #printf("%s\n",plot_str);
+ 
+        plot_move(0,4)
+
+}'
+####################################################################
+
+
+####################################################################
+# Integrate the data ....
+# DAT should be a col of x and a col of Y data
+# Note assume that sig2_y = Y is error of the signal 
+# Note this is a histogram int --> correct for traj scans!
+# Also note the array should be correctly sized, ie this loops through
+#  all the elements in the array.....!!!!!!!!!
+#
+# This function returns 1 on success and 0 on failure
+####################################################################
+# these hold the results of the SC_INT macro
+global SC_INT_I
+global SC_INT_Itot
+global SC_INT_BGR
+global SC_INT_AVE_BGR
+global SC_INT_PRSD
+
+#############################
+
+def SC_INT( DAT_X, DAT_Y, num_pts, num_bgr) '{
+    local j, nrow 
+    local idx_low, idx_high;
+          idx_low = idx_high = 0;
+    local idx_sl, idx_sh;
+          idx_sl =  idx_sh = 0;
+    local bgr_l, bgr_h, bgr_err
+          bgr_l = bgr_h = bgr_err = 0;
+    local int_idx, del_x_tot, Itot, sig2_I
+          int_idx = del_x_tot = Itot = sig2_I = 0;
+    local del_x_ave, ave_bgr, bgr;
+          del_x_ave = ave_bgr = bgr = 0;
+    local I, sig
+          I = sig = 0;
+
+    if (num_bgr == 0) num_bgr = 5;
+    SC_INT_I = 0;
+    SC_INT_Itot = 0;
+    SC_INT_BGR = 0;
+    SC_INT_AVE_BGR = 0;
+    SC_INT_PRSD = 0;
+
+
+    # check the data array
+    if (num_pts == 0) num_pts = array_op("rows",DAT_X) 
+
+    if ( array_op("rows",DAT_X) < num_pts ){  
+         print "Array/num_pts mismatch in INT"
+         return(0);
+    }
+
+    if( array_op("rows",DAT_X) != array_op("rows",DAT_Y) ) {
+         print "Array mismatch in INT"
+         return(0);
+    }
+    
+    if (2*num_bgr+3 > num_pts) num_bgr = 1;
+
+  
+    # get the high and low indecies
+    # always throw away the first point
+    # ie get del_x by 2nd - 1st
+    idx_low = 1;    
+    idx_high = num_pts-1; 
+
+   # index for signal points low side and high side
+   idx_sl =  idx_low + num_bgr - 1; 
+   idx_sh =  idx_high - (num_bgr - 1);
+
+   # get the bgr on the low side, then high side
+   for (j = idx_low; j <= idx_sl; j++){
+      bgr_l = bgr_l + DAT_Y[j] / fabs( DAT_X[j] - DAT_X[j-1] );    # makes cnts/del_x 
+      bgr_err = bgr_err + DAT_Y[j]; 
+   }
+   for (j =  idx_sh; j <= idx_high; j++){ 
+      bgr_h = bgr_h + DAT_Y[j] / fabs( DAT_X[j] - DAT_X[j-1] );    # makes cnt/del_x
+      bgr_err = bgr_err + DAT_Y[j];
+   }
+
+
+  # get the total integrated intensity
+  # for (j = idx_sl; j<idx_sh; j++){  
+  for (j = idx_low; j <= idx_high; j++){ 
+    int_idx = int_idx + 1;
+    del_x_tot = del_x_tot + fabs( DAT_X[j] - DAT_X[j-1] );   
+    Itot = Itot + DAT_Y[j];              
+    sig2_I = sig2_I + DAT_Y[j];  
+  }
+
+  # get the tot bgr
+  ave_bgr = (bgr_h + bgr_l)/(2*num_bgr);
+  bgr = ave_bgr* del_x_tot;
+
+ 
+  # get the bgr subtracted intensity and err
+  I = Itot - bgr;
+  sig=sqrt( sig2_I + bgr_err * ( square( del_x_tot/(2*num_bgr) )  ) );
+  if (I < 0) I = 0; 
+
+
+ # return stuff
+  SC_INT_I         = I;
+  SC_INT_Itot      = Itot;
+  SC_INT_BGR       = bgr;
+  SC_INT_AVE_BGR   = bgr/int_idx;
+  if(I>0){
+     SC_INT_PRSD   = 100*sqrt(sig2_I)/I;
+  } else {
+     SC_INT_PRSD   = 0;
+  }
+
+return(1);  # success
+
+}'
+####################################################################
+
+
+
+####################################################################
+# maro to check for width vs range ...
+# Note this function operates on the data in the SCAN_D array!!!!
+# scan_init is the initial position for the motor
+# if scan_init = -999 then assume the scan was symmetric
+#
+# this function returns a four element array
+# 
+#  ret_array[0] = scan_bad flag
+#  ret_array[1] = del_low 
+#  ret_array[2] = del_high
+#  ret_array[3] = num_pts
+#
+#  The scan_bad flag has the following meanings
+#     flag =  0 everything is fine 
+#     flag =  1 scan test failed, range/num_pts needs to be adjusted
+#     flag =  2 error with calcs...
+#     flag =  3 error trying to integrate, ie stats are poor
+#
+####################################################################
+# define PRSD cuttoff for stats
+global WIDTH_PRSD_CUTOFF
+       WIDTH_PRSD_CUTOFF = 50;
+
+
+def SC_WIDTH(scan_init) '{
+    local j; 
+    local xmin, xmax, xtot, del_x; 
+    local fw, cfw, test_int;
+   # local fw_low, fw_high, tmp1 ;  
+    local scan_bad; 
+    local low, high, del_low, del_high, num_pts, scan_cen;
+    local array ret_array[4];
+    ret_array = 0;
+
+   # note just work on SCAN_D data, ie
+    local array DAT_X[NPTS][1]
+    local array DAT_Y[NPTS][1]
+
+    DAT_X[0:NPTS-1] = SCAN_D[0:NPTS-1][0]
+    DAT_Y[0:NPTS-1] = SCAN_D[0:NPTS-1][DET+1]/SCAN_D[0:NPTS-1][MON+1]
+
+   
+   # what the xmin, xmax, xtot and avg del_x
+   xmin = array_op("min",DAT_X);
+   xmax = array_op("max",DAT_X);
+   xtot = xmax - xmin;
+   del_x = xtot/(NPTS-1);  
+
+   # what the full width etc....
+   fw   =  array_op("fwhm",  DAT_X,DAT_Y);
+   cfw  =  array_op("cfwhm", DAT_X,DAT_Y);
+   if (fw == 0){                    # couldnt find a peak
+       scan_bad = ret_array[0] = 2;
+       return(ret_array);
+   }
+
+#   tmp1  = array_op("lhmx",  DAT_X,DAT_Y);
+#   fw_high = array_op("uhmx",DAT_X,DAT_Y);
+#   if ( fw_high < tmp1){
+#       fw_low = fw_high;
+#       fw_high = tmp1
+#   } else {
+#       fw_low = tmp1;
+#   }
+
+   # integrate to see if there is a peak, use 3 bgr points
+   test_int = SC_INT( DAT_X, DAT_Y, NPTS, 3);
+   if (test_int != 1){               # if the int failed
+       scan_bad = ret_array[0] = 2;
+       return(ret_array);
+   }
+    
+#   p "xmin =" xmin " xmax = " xmax " xtot = " xtot  " del_x = " del_x 
+#   p "fw = " fw  " cfw = " cfw " fw_low = " fw_low  " fw_high = " fw_high 
+#   p "I= " SC_INT_I "  PRSD= " SC_INT_PRSD;
+#   p "Itot= " SC_INT_Itot  "  BGR= " SC_INT_BGR " AVE_BGR= " SC_INT_AVE_BGR;
+   
+   if ( (SC_INT_PRSD > WIDTH_PRSD_CUTOFF ) || (SC_INT_I == 0) ) {
+       p "Cant get width info, stats not good enough"
+       scan_bad = ret_array[0] = 3;
+       return(ret_array);
+   } 
+
+   
+   # test that the scan range was within aceptable limits
+   # the test passes if the min and max of the scan fall within
+   # 2 to 14 full widths of the peak center
+   scan_bad = FALSE;
+   if ( xmin > (cfw - 2*fw) ) {
+       p "#SCW: xmin test failed: xmin too big"
+       scan_bad = TRUE;
+   }
+   if ( xmin < (cfw - 14*fw) ) {
+       p "#SCW: xmin test failed: xmin too small"
+       scan_bad = TRUE;
+   }
+   if ( xmax < (cfw + 2*fw) ){
+       p "#SCW: xmax test failed: xmax too small"
+       scan_bad = TRUE;
+   }
+   if ( xmax > (cfw + 14*fw) ) {
+       p "#SCW: xmax test failed: xmax too big"
+       scan_bad = TRUE;
+   }
+
+   # see if the point spacing was reasonable
+   if ( fw < 1.2*del_x ) {
+        p "#SCW: num points test failed, need more points"
+        scan_bad = TRUE;
+   }
+
+
+   # calc an optimal range for the scan 
+   # try to get 6 full widths of the peak on each side  
+   # if scan_init =-999, assume the 
+   # scan was symmetric about the center
+   # note lets do these calcs anyway even if the scan is ok
+   #if (scan_bad == TRUE) {
+     if (scan_init == -999){
+         scan_cen = (xmin + xmax)/2;
+         del_low = -(fabs(scan_cen - cfw) + 6*fw);
+         del_high = (fabs(scan_cen - cfw) + 6*fw);
+     } else {
+         low = cfw - 6*fw;
+         del_low = low - scan_init;
+         high = cfw + 6*fw;
+         del_high = high - scan_init;
+     }
+     num_pts = ( del_high - del_low )/(fw/4);
+     num_pts = int(num_pts)
+
+     p "#SCW: Scan Range Bad = " scan_bad
+     p "#SCW: Sugessted scan: del_low = " del_low " del_high = " del_high  " num_pts = " num_pts  
+   #}
+
+   ret_array[0] = scan_bad;
+   ret_array[1] = del_low;
+   ret_array[2] = del_high;
+   ret_array[3] = num_pts;
+   return(ret_array);
+  
+}'
+
+####################################################################
+
+

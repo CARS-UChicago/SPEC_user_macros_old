@@ -1,0 +1,137 @@
+# New globals and thier default values (ie values assigned when site_startup is run)
+
+
+###### site_startup.mac
+global USERMAC            "/home/specadm/user_macros" 
+global IS_TRAJ_SCAN       0 
+global IS_FAKE_SCAN       0 
+global IS_RS              0
+global TRUE, FALSE        1,0
+
+
+###### site_standard.mac
+- none
+
+###### site_scan_utils.mac
+array  ATTEN[4]           0
+global SAT_CNTR_IDX       2      #i1
+array  SAT_CNTR_VAL[4]           # cps in i1 when bicron is sat ....
+       SAT_CNTR_VAL[0]   1e5;    # add atten 1  
+       SAT_CNTR_VAL[1]   5e5;    # add atten 2
+       SAT_CNTR_VAL[2]   1e6;    # add atten 3
+       SAT_CNTR_VAL[3]   5e6;    # add atten 4
+
+global FS_MOVE            0
+global FS_WAIT            0
+global FS_CEN 
+global FS_FWHM
+global FS_AMP
+
+###### site_scan_anal.mac
+global SC_ANAL_BAD               # = summary_data_array[0][0];
+global SC_ANAL_Y_MAX             # = summary_data_array[0][1];
+global SC_ANAL_X_AT_Y_MAX        # = summary_data_array[0][2];
+global SC_ANAL_FWHM              # = summary_data_array[0][3];
+global SC_ANAL_CFWHM             # = summary_data_array[0][4];
+global SC_ANAL_LHMX              # = summary_data_array[0][5];
+global SC_ANAL_UHMX              # = summary_data_array[0][6];
+global SC_ANAL_I                 # = summary_data_array[0][7];
+global SC_ANAL_PRSD              # = summary_data_array[0][8];
+
+
+global SC_ANAL_PRSD_CUTOFF  25     # define PRSD cuttoff for stats
+global SC_PLOT_AVE           0     # do we want plots of avg data
+
+# these are for the SC_INT macro
+global SC_INT_I
+global SC_INT_Itot
+global SC_INT_BGR
+global SC_INT_AVE_BGR
+global SC_INT_PRSD
+
+###### rod_scan.mac
+global RS_SCALE_BY          1 
+global RS_CHECK_SCAN        1
+global RS_SKIP_BRAGGS       1
+global RS_MAX_REP           5
+global RS_SCAN_RANGE        1
+global RS_NUM_PTS          40
+global RS_MIN_CNT          0.1
+global RS_I_MAX_SCALE      200
+global RS_I_MIN_SCALE      1.1
+global RS_TEST              1
+global RS_SCAN_TITLE
+
+
+######  traj_scans1.mac
+global TRAJ_IOC_PREFIX
+global TRAJ_NAME
+global TRAJ_MCS_PREFIX
+global TRAJ_MOTOR_NAME
+global MAX_TRAJ_MOTORS
+global MAX_TRAJ_INDEX
+global MAX_TRAJ_MCS
+global MAX_TRAJ_POINTS
+global MIN_TRAJ_ELEMENTS
+global MAX_TRAJ_ELEMENTS
+global TRAJ_USE_ACTUAL
+global TRAJ_INDEX
+global TRAJ_CLOCK_SCALE
+TRAJ_IOC_PREFIX            "13IDC:"
+TRAJ_NAME                  TRAJ_IOC_PREFIX "traj1"
+TRAJ_MCS_PREFIX            TRAJ_IOC_PREFIX "str:"
+TRAJ_MOTOR_NAME[0]         TRAJ_NAME "M1"
+TRAJ_MOTOR_NAME[1]         TRAJ_NAME "M2"
+TRAJ_MOTOR_NAME[2]         TRAJ_NAME "M3"
+TRAJ_MOTOR_NAME[3]         TRAJ_NAME "M4"
+TRAJ_MOTOR_NAME[4]         TRAJ_NAME "M5"
+TRAJ_MOTOR_NAME[5]         TRAJ_NAME "M6"
+TRAJ_MOTOR_NAME[6]         TRAJ_NAME "M7"
+TRAJ_MOTOR_NAME[7]         TRAJ_NAME "M8"
+TRAJ_MCS_NAME[0]           TRAJ_MCS_PREFIX "mca1"
+TRAJ_MCS_NAME[1]           TRAJ_MCS_PREFIX "mca2"
+TRAJ_MCS_NAME[2]           TRAJ_MCS_PREFIX "mca3"
+TRAJ_MCS_NAME[3]           TRAJ_MCS_PREFIX "mca4"
+TRAJ_MCS_NAME[4]           TRAJ_MCS_PREFIX "mca5"
+TRAJ_MCS_NAME[5]           TRAJ_MCS_PREFIX "mca6"
+TRAJ_MCS_NAME[6]           TRAJ_MCS_PREFIX "mca7"
+TRAJ_MCS_NAME[7]           TRAJ_MCS_PREFIX "mca8"
+MAX_TRAJ_MOTORS            8
+MAX_TRAJ_INDEX             9
+MAX_TRAJ_MCS               8
+MAX_TRAJ_POINTS            1000
+MIN_TRAJ_ELEMENTS          4
+MAX_TRAJ_ELEMENTS          1000
+TRAJ_CLOCK_SCALE           counter_par(SEC,"scale")
+TRAJ_USE_ACTUAL            1
+# This table gives the TRAJ motor corresponding to each SPEC motor
+if (motor_mne(0) == "tth"){
+  TRAJ_INDEX[0]           4  # tth (Two theta)
+  TRAJ_INDEX[1]          -1  # th 
+  TRAJ_INDEX[2]          -1  # chi
+  TRAJ_INDEX[3]          -1  # phi
+  TRAJ_INDEX[4]           2  # kth (Omega)
+  TRAJ_INDEX[5]           1  # kap (Kappa)
+  TRAJ_INDEX[6]           0  # kphi (Phi)
+  TRAJ_INDEX[7]           3  # psi (Psi)
+  TRAJ_INDEX[8]           5  # nu  (Nu)
+} else if (motor_mne(0) == "del"){
+  TRAJ_INDEX[0]           4  # del (Two Theta)
+  TRAJ_INDEX[1]          -1  # eta
+  TRAJ_INDEX[2]          -1  # chi
+  TRAJ_INDEX[3]          -1  # phi
+  TRAJ_INDEX[4]           5  # nu  (Nu)
+  TRAJ_INDEX[5]           3  # mu (Psi)
+  TRAJ_INDEX[6]           2  # keta (Omega)
+  TRAJ_INDEX[7]           1  # kap (Kappa)
+  TRAJ_INDEX[8]           0  # kphi (Phi)
+}
+
+array _traj_motor[MAX_TRAJ_INDEX]
+array _traj_move[MAX_TRAJ_MOTORS]
+array _traj_pos[MAX_TRAJ_MOTORS][MAX_TRAJ_ELEMENTS]
+array _traj_time[MAX_TRAJ_ELEMENTS]
+array _traj_counts[MAX_TRAJ_MCS][MAX_TRAJ_POINTS]
+array _traj_actual[MAX_TRAJ_MOTORS][MAX_TRAJ_POINTS]
+
+

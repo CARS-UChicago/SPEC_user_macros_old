@@ -1,0 +1,381 @@
+### Global variable used by these macros
+global RS_SCALE_BY_SQRT
+       RS_SCALE_BY_SQRT = 1;     
+global RS_CHECK_SCAN
+       RS_CHECK_SCAN = 1;
+global RS_SKIP_BRAGGS
+       RS_SKIP_BRAGGS = 1;
+global RS_MAX_REP
+       RS_MAX_REP = 5;
+global RS_TEST
+       RS_TEST = 1;
+global RS_PLOT_AVE
+       RS_PLOT_AVE = 0;
+global RS_SAT_CNTR_IDX
+       RS_SAT_CNTR_IDX = 2;   # i1
+global RS_SAT_CNTR_VAL
+       RS_SAT_CNTR_VAL = 1e5; # cps in i1 when bicron is sat ....
+global RS_SCAN_TITLE
+
+
+# 
+# Need a better rocking scan, ie stretch the bgr ??
+#
+
+
+
+# Note _ascan calls scan_data which builds the SCAN_D array...
+# SCAN_D[pnt][0] = x-value
+# SCAN_D[pnt][1] = sec
+# SCAN_D[pnt][2] = io
+#      etc.. 
+# SCAN_D always(??) has all the scalars in thier usual order
+# therefore, DET + 1 should also be the right col for data averaging 
+# and MON + 1 to normalize the data (MON < 0 means its shut off)
+# see the plotselect and counters macros 
+#
+
+
+####################################################################
+# Rod_scan.
+def rod_scan '{
+    # local vars for input data
+    local h_val, k_val, l_st, l_en, del_l 
+    local max_cnt, l_b, del_lb 
+
+    # local vars for scan calcs, etc...    
+    local num_l_pts,F_scale, del_sign  
+
+
+    # local vars for rocking scan
+    local scan_range, num_scan_pts, max_cnt, max_rep, num_rep 
+      scan_range =  1;
+      num_scan_pts = 40;
+      min_cnt = 0.5;  # min cnt time is 1/2 sec per point
+      max_rep = RS_MAX_REP;
+     
+
+    # other misc local vars
+    local msg_str, j, temp_val, l_val, exec 
+    
+   
+    # check input
+    if ($# != 9 ) {
+      msg_str = "Usage: rod_scan H K L_start L_end del_L" 
+      msg_str = msg_str " Scan_Axis Max_count L_bragg Delta_Lbragg\n "
+      print msg_str
+      exit
+    } 
+    # This makes sure the scan-axis exists 
+    _check0 $6
+
+
+    # assign input data to local vars
+    h_val = $1  
+    k_val = $2 
+    l_st = $3 
+    l_en = $4 
+    del_l = $5 
+    scan_axis = $6 
+    max_cnt = $7 
+    l_b = $8 
+    del_lb = $9
+
+    num_l_pts = int( (l_en - l_st)/del_l );
+    del_sign = sign(num_l_pts)
+    num_l_pts = 1 + (  del_sign * num_l_pts) ;
+    if (num_l_pts == 1) {
+        msg_str = " Error: Num points = 1 "
+        print msg_str
+        exit
+    }
+    
+    # build an array for the rocking scan data
+    local array RS_ARRAY[num_l_pts][6]
+
+    ## Make an array of HKL, cnt_times, F-values and bragg flags 
+    #   RS_ARRAY[j][0] = H;
+    #   RS_ARRAY[j][1] = K;
+    #   RS_ARRAY[j][2] = L;
+    #   RS_ARRAY[j][3] = count_time;
+    #   RS_ARRAY[j][4] = F;
+    #   RS_ARRAY[j][5] = bragg_flag;
+    #
+    # Note F_scale sets the scale between the maximum intensity and min intensity
+    # ie if F_scale = 1e3, then the max_F = 1e3 and min_F = 1e-3
+    # The min_F is gaurenteed to occur at the anti-bragg point and then F will saturate
+    # near the bragg point at max_F.  1e-3 seems to be a good value, since the cnt times
+    # are scaled as cnt_time = min_cnt * sqrt(1/F).  Therefore if the min count time is 1sec
+    # this would give cnt_time ~ 30sec at the anti-Bragg.  
+    # Note we should also check to see if the L-value might result in an allowed 3rd order or 4th 
+    # order reflection, if so include this as a flag in the last col of the RS_ARRAY 
+
+    F_scale = 1e3;  
+    for (j=0;j<num_l_pts;j++) {
+       bragg_flag = 0;
+       RS_ARRAY[j][0] = h_val;
+       RS_ARRAY[j][1] = k_val;
+       RS_ARRAY[j][2] = l_val = l_st + (j)*(del_l)*(del_sign);
+       RS_ARRAY[j][3] = min_cnt;
+      
+       temp_val = square( sin( PI*(l_val - l_b ) / del_lb ) ); 
+       if (temp_val < 1/F_scale) {
+             RS_ARRAY[j][4] = F_scale;
+             RS_ARRAY[j][5] = 1;
+       } else {
+             RS_ARRAY[j][4] = (1/temp_val)/F_scale;
+             RS_ARRAY[j][5] = 0;
+       }  
+    }
+
+   ## Now scale the cnt times by sqrt(1/F) or 1/F 
+    for (j=0;j<num_l_pts;j++) {
+      if(RS_SCALE_BY_SQRT){
+         RS_ARRAY[j][3]   = int( RS_ARRAY[j][3] * sqrt( 1 / RS_ARRAY[j][4] ) );
+      } else {
+          RS_ARRAY[j][3]   = int( RS_ARRAY[j][3] * 1 / RS_ARRAY[j][4] );
+      }
+      if (RS_ARRAY[j][3]   >  max_cnt) RS_ARRAY[j][3] = max_cnt;
+      if (RS_ARRAY[j][3]   ==  0) RS_ARRAY[j][3] = min_cnt;
+    }
+
+ 
+   ## Do pre checking on the HKL range, 
+   # ie can we get to all these places
+   for (j=0;j<num_l_pts;j++) {
+       H = RS_ARRAY[j][0]; 
+       K = RS_ARRAY[j][1]; 
+       L = RS_ARRAY[j][2];
+       if (calcA){
+          eprintf("(H K L = %g %g %g)\n",H,K,L)
+          exit
+       }
+       _bad_lim=0; _hkl_lim
+       if (_bad_lim) {
+          eprintf("(H K L = %g %g %g)\n",H,K,L)
+          exit
+      }
+   }
+
+   
+  # Print message that starting a new rod scan
+    msg_str = sprintf("%s %g %g","#ROD_SCAN rod_scan", h_val, k_val);
+    msg_str = sprintf("%s %g %g %g",msg_str, l_st,l_en,del_l);
+    msg_str = sprintf("%s %s %g %g %g", msg_str, motor_mne(scan_axis), max_cnt, l_b, del_lb); 
+    printf("\n%s\n", msg_str); 
+
+## scan loop
+# do the scan
+if (RS_CHECK_SCAN == 0) {
+       ## Do the scans
+       # make sure the A array is updated with current values
+       get_angles;    
+
+       if (DATAFILE !=""){
+              fprintf(DATAFILE,"\n%s\n", msg_str); 
+       }
+       
+       ## start L loop 
+       for (j=0;j<num_l_pts;j++) {
+           # create a data array to hold the data for this scan
+           # note the redeclaration should clear the old version...
+           # ie shouldnt have to worry about old data still in there ... 
+           local array RS_X_ARRAY[num_scan_pts+1][max_rep];
+           local array RS_Y_ARRAY[num_scan_pts+1][max_rep];
+
+           # get HKL and cnt time for the scan
+           H = RS_ARRAY[j][0]; 
+           K = RS_ARRAY[j][1]; 
+           L = RS_ARRAY[j][2];
+           scan_cnt_time = RS_ARRAY[j][3];
+
+           RS_SCAN_TITLE = sprintf("#RS H = %g , K = %g , L = %g",H,K,L);
+
+           ## if its a bragg skip it
+           if ( (RS_ARRAY[j][5] == 1) && (RS_SKIP_BRAGGS == 1) ) {
+              printf("%s\n",RS_SCAN_TITLE);
+              msg_str = sprintf("#Skip L = %g, Bragg Peak", L);
+              printf("%s\n",msg_str);
+           } else {
+           ## do the scan
+              printf("%s\n",RS_SCAN_TITLE);
+              local s, e, n, ti
+              s =  -1*scan_range/2
+              e = scan_range/2
+              n = num_scan_pts
+              ti = scan_cnt_time
+              
+              # keep doing the scan untill its good enough 
+              # or hit max repeat ...
+              num_rep = 0;
+              exec = 1;
+              local array BAD_SCAN_IDX[max_rep];
+              BAD_SCAN_IDX = 0;
+
+              while( (exec==1) && (num_rep<max_rep) ) { 
+                   # note put the RS_SCAN_TITLE and num_rep + 1 into the Fheader macro ...
+                   # test with fake scans
+                   if (RS_TEST) {
+                      fake_br H K L 
+                      waitmove
+                      fake_dscan $6 s e n ti 1e4*RS_ARRAY[j][4] 10 .1
+                   # or do the real scan
+                   } else {
+                      br H K L 
+                      waitmove
+                      dscan $6 s e n ti  
+                   }
+  
+                   # load the data from this scan into an array for averaging
+                   # and analyzing ......
+                   RS_X_ARRAY[0:n][num_rep] = SCAN_D[0:n][0];
+                   if(MON < 0){
+                      RS_Y_ARRAY[0:n][num_rep] = SCAN_D[0:n][DET+1];
+                   } else {
+                      RS_Y_ARRAY[0:n][num_rep] = SCAN_D[0:n][DET+1]/SCAN_D[0:n][MON+1];
+                   }
+
+                   # check the data
+                   BAD_SCAN_IDX[num_rep] = RS_ANAL_AND_PLOT(RS_X_ARRAY, RS_Y_ARRAY, num_rep + 1, BAD_SCAN_IDX ) 
+                   
+                   # if its ok move on
+                   if (BAD_SCAN_IDX[num_rep-1] == 0) exec = 0;
+
+                   # here need to print some info about the scan 
+                   # ie at leat have to print the value of BAD_SCAN_IDX .....
+                    num_rep = num_rep + 1;
+                   
+              }  
+             # end of while loop on the scan
+             # here need to print some info about the avg scan?? .....
+           }
+       }
+       # end L loop
+# check the scan
+} else {
+       # check out the scan info
+       local tot_time;
+       tot_time = 0;
+       p "test scan info"
+       p "       H      K      L     cnt      F      b_flag "
+       for (j=0;j<num_l_pts;j++){
+           msg_str="";        
+           for(k=0;k<6;k++){
+            msg_str = sprintf("%s  %6.5g", msg_str, RS_ARRAY[j][k]);
+           }
+           tot_time = tot_time + RS_ARRAY[j][3]*num_scan_pts;
+           msg_str = sprintf("%s \n", msg_str);
+           p msg_str;
+       }      
+       p "Number of points = ", num_l_pts
+       p "Estimated total time (sec) = ", tot_time 
+       p "Estimated total time (min) = ", tot_time / 60 
+       p "Estimated total time (hrs) = ", tot_time / 3600 
+      
+}
+## end of scan loop
+
+# may want to print a message that its done
+# note what happens if cntrl-c outa the scan?
+
+}'
+
+###################################################################################
+# this is similiar to the splot macro in standard.mac
+def RS_ANAL_AND_PLOT( rs_x_array, rs_y_array, rs_nscans, bad_idx_array) '{
+        local j, rs_nrows, rs_ncols, bad_idx, n_ave; 
+        bad_idx = 0;
+
+        # bad_idx --> BAD_SCAN_IDX[] in the rodscan macro:
+        # BAD_SCAN_IDX = -1   problem calculating the stats ...(??)
+        # BAD_SCAN_IDX =  0   is a good scan (or avg is good)
+        # BAD_SCAN_IDX =  1   poor stats repeat same scan and avg
+        # BAD_SCAN_IDX =  2   detector is saturated, repeat and dont avg
+        # BAD_SCAN_IDX =  3   scan is too narrow, repeat wider (? include in average)
+        # BAD_SCAN_IDX =  4   scan is too wide, repeat narrower (? include in average)
+
+         
+        rs_nrows = array_op("rows",rs_x_array);
+        if( rs_nrows != array_op("rows",rs_y_array) ) {
+            print "Error array mismatch"
+            return -1;
+        }
+
+        rs_ncols = array_op("cols",rs_x_array);
+        if( rs_ncols != array_op("cols",rs_y_array) ) {
+            print "Error array mismatch"
+            return -1;
+        }
+
+        # check for saturation
+        # check for width vs range ...
+
+
+        # average the good data
+        local array AVG_ARRAY[rs_nrows][2];
+        AVG_ARRAY = 0;
+        n_ave = 0;
+        for (j=0;j<rs_nscans;j++){
+           if (bad_idx_array[j] == 1){
+               AVG_ARRAY[][0] = AVG_ARRAY[][0] + rs_x_array[][j] ;
+               AVG_ARRAY[][1] = AVG_ARRAY[][1] + rs_y_array[][j] ;
+               n_ave = n_ave + 1;
+           }
+        }
+        AVG_ARRAY[][0] = AVG_ARRAY[][0] / n_ave;
+        AVG_ARRAY[][1] = AVG_ARRAY[][1] / n_ave; 
+
+
+        if(RS_PLOT_AVE){
+           # initialize the plot and plot the avg data
+           RS_INIT_PLOT( rs_nscans ) 
+           array_plot(AVG_ARRAY[][0],AVG_ARRAY[][1])
+         
+           p "Plotted avg data for nscans = ", rs_nscans  
+           xx = getval("hit any key to cont");
+        }
+
+  
+
+
+# print the scan statistics ....
+p rs_nrows, rs_ncols, rs_nscans
+
+
+
+return(bad_idx);
+
+}'
+
+####################################################################
+# this is similiar to the splot macro in standard.mac
+def RS_INIT_PLOT( nscans ) '{
+        local title, y_label 
+
+        # set up the plot window to plot the averaged data
+        if (PLOT_MODE&128) {
+		plot_cntl(sprintf("colors=%s",splot_col))
+		plot_cntl("open")
+	  }
+	  plot_cntl("erase")
+	  plot_cntl(PLOT_MODE&8? "xexact":"-xexact")
+	  plot_cntl(PLOT_MODE&32? "ylog":"-ylog")
+	  plot_cntl(PLOT_MODE&256? "-dots":"dots")
+	  plot_cntl(PLOT_MODE&512? "-lines":"lines")
+	  plot_cntl(PLOT_MODE&1024? "-ebars":"ebars")
+
+        # plot range
+	  plot_range("auto","auto","auto","auto")
+
+        # title, y-axis label, x-axis label
+        title = sprintf("%s, Nave = %d", RS_SCAN_TITLE, nscans);
+	  plot_move(-50,0,title)
+	  plot_move(0,1,"avg DET norm to MON")
+	  plot_move(0,-1,sprintf("%.8s", pl_xl))
+
+	#plot_move(-50,0,sdata_res_s1(@pl_a,pl_x,pl_y,pl_n,pl_type))
+	#plot_move(-50,1,sdata_res_s2(@pl_a,pl_x,pl_y,pl_n,pl_type))
+	#plot_move(0,3)
+
+}'
+####################################################################

@@ -1,0 +1,468 @@
+####################################################################
+### Rod scan macros
+####################################################################
+#
+# Globals variables
+global RS_SCALE_BY
+       RS_SCALE_BY = 1;
+       # RS_SCALE_BY = 0; # just use max_cnt time for all
+       # RS_SCALE_BY = 1; # use sqrt(1/I)
+       # RS_SCALE_BY = 2; # use 1/I    
+global RS_MAX_REP
+       RS_MAX_REP = 5;
+global RS_SCAN_RANGE
+       RS_SCAN_RANGE = 1;
+global RS_NUM_PTS
+       RS_NUM_PTS = 40;
+global RS_MIN_CNT
+       RS_MIN_CNT = 0.1;
+global RS_I_MAX_SCALE
+       RS_I_MAX_SCALE = 200; 
+global RS_I_MIN_SCALE
+       RS_I_MIN_SCALE = 1.1; 
+
+# Global Flags
+global RS_CHECK_SCAN
+       RS_CHECK_SCAN = TRUE;
+global RS_SKIP_BRAGGS
+       RS_SKIP_BRAGGS = TRUE;
+global RS_TEST
+       RS_TEST = TRUE;
+
+# Global title variable
+global RS_SCAN_TITLE
+
+
+####################################################################
+### These macros set the flags for various iterations on rod_scan
+### the mac file should include the rod_scan scans and set any flags 
+### that you want different from the defaults set here.
+####################################################################
+
+####################################################################
+# do_rod_scan
+def do_rod_scan '{
+  local t
+  # check input
+  if ($# != 1 ) {
+    t = "Usage: macro_file_name" 
+    print t
+    exit
+  } 
+
+  # default flags for rod_scan
+  RS_SKIP_BRAGGS = TRUE;
+  RS_CHECK_SCAN = FALSE;
+  RS_TEST = FALSE;
+  RS_SCALE_BY = 1;     
+
+  # flags for SC_ANAL and Fake_scan macros
+  SC_PLOT_AVE = TRUE;
+
+  # run the scan
+  t = $1
+  qdofile(t) 
+
+}'
+
+####################################################################
+# test_rod_scan
+def test_rod_scan '{
+  local t
+  # check input
+  if ($# != 1 ) {
+    t = "Usage: macro_file_name" 
+    print t
+    exit
+  } 
+
+  # flags for rod_scan
+  RS_CHECK_SCAN = TRUE;
+  RS_SCALE_BY = 1;     
+
+  # check the scan
+  t = $1
+  qdofile(t)      
+
+
+}'
+
+####################################################################
+# fake_rod_scan
+def fake_rod_scan '{
+  local t
+  # check input
+  if ($# != 1 ) {
+    t = "Usage: macro_file_name" 
+    print t
+    exit
+  } 
+
+  # flags for rod_scan
+  RS_SKIP_BRAGGS = TRUE;
+  RS_CHECK_SCAN = FALSE;
+  RS_TEST = TRUE;
+  RS_SCALE_BY = 1;     
+
+  # flags for SC_ANAL and fake_dscan macros
+  SC_PLOT_AVE = TRUE;
+  SC_PLOT_PAUSE = TRUE
+  FS_MOVE = FALSE;
+  FS_WAIT = FALSE;
+
+  # run the scan
+  t = $1
+  qdofile(t)      
+
+}'
+
+####################################################################
+
+####################################################################
+### The rod scan macro.....
+####################################################################
+####################################################################
+# Rod_scan.
+# 
+# Note _ascan calls scan_data which builds the SCAN_D array...
+# SCAN_D[pnt][0] = x-value
+# SCAN_D[pnt][1] = sec
+# SCAN_D[pnt][2] = io
+#      etc.. 
+# SCAN_D always(??) has all the scalars in their usual order
+# therefore, DET + 1 should also be the right col for data averaging 
+# and MON + 1 to normalize the data (MON < 0 means its shut off)
+# see the plotselect and counters macros 
+#
+#  ToDo
+# - Check that the fastest rocking scan
+#   wont exceed the limits in traj mode ....
+# - Need a better rocking scan, ie stretch the bgr ??
+# - Make sure cntrl-c is clean (ie reset IS_ROD_SCAN = 0, etc...)
+# - Better figure of merit for redoing a scan???
+####################################################################
+def rod_scan '{
+    # local vars for input data
+    local h_val, k_val, l_st, l_en, del_l 
+    local max_cnt, l_b, del_lb 
+
+    # local vars for scan calcs, etc...    
+    local num_l_pts, del_sign 
+
+    # local vars for rocking scan
+    local scan_range, num_scan_pts, max_cnt, max_rep, num_rep 
+      scan_range    = RS_SCAN_RANGE;
+      num_scan_pts  = RS_NUM_PTS;
+      max_rep       = RS_MAX_REP;
+      min_cnt       = RS_MIN_CNT;                   
+
+    # other misc local vars
+    local msg_str, j, exec 
+    
+   
+    # check input
+    if ($# != 9 ) {
+      msg_str = "Usage: rod_scan H K L_start L_end del_L" 
+      msg_str = msg_str " Scan_Axis Max_count L_bragg Delta_Lbragg\n "
+      print msg_str
+      exit
+    } 
+    # This makes sure the scan-axis exists 
+    _check0 $6
+
+
+    # assign input data to local vars
+    h_val     = $1  
+    k_val     = $2 
+    l_st      = $3 
+    l_en      = $4 
+    del_l     = $5 
+    scan_axis = $6 
+    max_cnt   = $7 
+    l_b       = $8 
+    del_lb    = $9
+
+    # calc num L points
+    num_l_pts = int( (l_en - l_st)/del_l );
+    del_sign = sign(num_l_pts);
+    num_l_pts = 1 + (  del_sign * num_l_pts) ;
+    if (num_l_pts <= 1) {
+        msg_str = " Error: Num points = 1 "
+        print msg_str
+        exit
+    }
+    
+    ## Make an array of HKL, cnt_times, F-values and bragg flags 
+    #   RS_ARRAY[j][0] = H;
+    #   RS_ARRAY[j][1] = K;
+    #   RS_ARRAY[j][2] = L;
+    #   RS_ARRAY[j][3] = count_time;
+    #   RS_ARRAY[j][4] = I;
+    #   RS_ARRAY[j][5] = bragg_flag;
+    #
+    #
+    local double array RS_ARRAY[num_l_pts][6]
+   {
+    local l_val, bragg_flag, I 
+    I_scale_max = RS_I_MAX_SCALE;  
+    I_scale_min = RS_I_MIN_SCALE;
+    for (j=0;j<num_l_pts;j++) {       
+       bragg_flag = 0;
+       RS_ARRAY[j][0] = h_val;
+       RS_ARRAY[j][1] = k_val;
+       RS_ARRAY[j][2] = l_val = l_st + (j)*(del_l)*(del_sign);
+       RS_ARRAY[j][3] = max_cnt;
+      
+       I = square( sin( PI*(l_val - l_b ) / del_lb ) ); 
+       if (I <= 1/I_scale_max){
+             RS_ARRAY[j][4] = I_scale_max;
+             RS_ARRAY[j][5] = 1;
+       } else if (I >= 1/I_scale_min){
+             RS_ARRAY[j][4] = I_scale_min;
+             RS_ARRAY[j][5] = -1;
+       } else {
+             RS_ARRAY[j][4] = 1/I;
+             RS_ARRAY[j][5] = 0;
+       }
+    }
+   }
+
+   ## Now scale the cnt times by sqrt(1/I), 1/I or just use max
+   if(RS_SCALE_BY != 0){
+     for (j=0;j<num_l_pts;j++) {
+         if (RS_ARRAY[j][5] ==  1) {
+              RS_ARRAY[j][3] = min_cnt;
+         } else if (RS_ARRAY[j][5] == -1) { 
+              RS_ARRAY[j][3] = max_cnt;
+         } else {
+              if(RS_SCALE_BY == 1){ 
+                 RS_ARRAY[j][3]   = RS_ARRAY[j][3] * sqrt( 1 / RS_ARRAY[j][4] ) ;
+              } else if (RS_SCALE_BY == 2){
+                 RS_ARRAY[j][3]   = RS_ARRAY[j][3] * 1 / RS_ARRAY[j][4] ;
+              }
+         }
+      }
+   }
+
+  # round the cnt times so they are even tenths of seconds ....
+  # also check and make sure NO cnt_times are less than min
+  {
+  local temp_time, temp_rem
+    for (j=0;j<num_l_pts;j++) {
+         temp_time = int(RS_ARRAY[j][3]);             
+         temp_rem = get_frac(RS_ARRAY[j][3]);
+         temp_rem = int(10*temp_rem);
+         RS_ARRAY[j][3] = temp_time + 0.1*temp_rem;
+         if (RS_ARRAY[j][3] < min_cnt) RS_ARRAY[j][3] = min_cnt;
+    }
+  }
+
+   ## Do pre checking on the HKL range, 
+   # ie can we get to all these places
+   for (j=0;j<num_l_pts;j++) {
+       H = RS_ARRAY[j][0]; 
+       K = RS_ARRAY[j][1]; 
+       L = RS_ARRAY[j][2];
+       if (calcA){
+          eprintf("(H K L = %g %g %g)\n",H,K,L)
+          exit
+       }
+       _bad_lim=0; _hkl_lim
+       if (_bad_lim) {
+          eprintf("(H K L = %g %g %g)\n",H,K,L)
+          exit
+      }
+   }
+
+# Print message that starting a new rod scan
+msg_str = sprintf("%s %g %g","#ROD_SCAN rod_scan", h_val, k_val);
+msg_str = sprintf("%s %g %g %g",msg_str, l_st,l_en,del_l);
+msg_str = sprintf("%s %s %g %g %g", msg_str, motor_mne(scan_axis), max_cnt, l_b, del_lb); 
+printf("\n%s\n", msg_str); 
+
+
+## scan loop
+# do the scan
+# create arrays to hold the data for the scans
+# the arrays should all be initialized to zero 
+local double array RS_X_ARRAY[num_scan_pts+1][max_rep];
+local double array RS_Y_ARRAY[num_scan_pts+1][max_rep];
+local double array SCAN_INFO[max_rep][12];
+local double array bad[max_rep];
+local H_scan, K_scan, L_scan
+
+# let the world know this is a rod_scan
+# IS_RS is used by the Fheader macro to print 
+IS_ROD_SCAN = TRUE
+
+######### Do the scans ##########
+if (RS_CHECK_SCAN == 0) {
+
+       # make sure the A array is updated with current values
+       get_angles;    
+
+       if (DATAFILE !=""){
+           fprintf(DATAFILE,"\n%s\n", msg_str); 
+       }
+       
+       ####### start L loop ############# 
+       for (j=0;j<num_l_pts;j++) {
+           # clear data arrays
+           RS_X_ARRAY = 0;
+           RS_Y_ARRAY = 0;
+           SCAN_INFO = 0;
+           bad = 0;
+
+           # get HKL and cnt time for the scan
+           H_scan = RS_ARRAY[j][0]; 
+           K_scan = RS_ARRAY[j][1]; 
+           L_scan = RS_ARRAY[j][2];
+
+
+           ## if its a bragg skip it
+           if ( (RS_ARRAY[j][5] == 1) && (RS_SKIP_BRAGGS == 1) ) {
+              printf("%s\n",RS_SCAN_TITLE);
+              msg_str = sprintf("#Skip L = %g, Bragg Peak", L_scan);
+              printf("%s\n",msg_str);
+           } else {
+           ## do the scan
+              local st, en, np, ti, r_idx;
+              st =  -1*scan_range/2;
+              en = scan_range/2;
+              np = num_scan_pts;
+              ti = RS_ARRAY[j][3];
+
+              ### keep doing the scan untill its good enough or hit max repeat ...
+              num_rep = 0; exec = 1;
+              while( (exec==1) && (num_rep<max_rep) ) { 
+                    # note RS_SCAN_TITLE is included in the scan header ....
+                    RS_SCAN_TITLE = sprintf("#RS H= %g  K= %g  L= %g num= %d", \
+                                             H_scan,K_scan,L_scan, num_rep + 1);
+                    printf("%s\n",RS_SCAN_TITLE);
+
+                   if (RS_TEST) {
+                      fake_br H_scan K_scan L_scan 
+                      waitmove
+                      fake_dscan $6 st en np ti 10*RS_ARRAY[j][4] 10 .1
+                   # or do the real scan
+                   } else {
+                      br H_scan K_scan L_scan 
+                      waitmove
+                      dscan $6 st en np ti  
+                   }
+ 
+                   # load the data from this scan into an array for averaging
+                   # and analyzing ......
+                   # note traj scans have np points, point scans have np+1 points
+                   if (IS_TRAJ_SCAN) {
+                       r_idx = np-1;
+                   } else {
+                       r_idx = np
+                   }
+
+                   RS_X_ARRAY[0:r_idx][num_rep]    = SCAN_D[0:r_idx][0];
+                   if(MON < 0){
+                      RS_Y_ARRAY[0:r_idx][num_rep] = SCAN_D[0:r_idx][DET+1];
+                   } else {
+                      RS_Y_ARRAY[0:r_idx][num_rep] = SCAN_D[0:r_idx][DET+1]/SCAN_D[0:r_idx][MON+1];
+                   }
+
+                   # check the data
+                   # SCAN_INFO[num_rep][] = SC_ANAL(RS_X_ARRAY, RS_Y_ARRAY, num_rep + 1, bad ); 
+                   # bad[num_rep] = SCAN_INFO[num_rep][0];
+                   
+                   # redo with globals 
+                   bad[num_rep] = SC_ANAL(RS_X_ARRAY, RS_Y_ARRAY, num_rep + 1, bad );
+                                                               # this is the array in SC_ANAL
+                   SCAN_INFO[num_rep][0] = SC_ANAL_BAD         # = summary_data[0][0];
+                   SCAN_INFO[num_rep][1] = SC_ANAL_Y_MAX       # = summary_data[0][1];
+                   SCAN_INFO[num_rep][2] = SC_ANAL_X_AT_Y_MAX  # = summary_data[0][2];
+                   SCAN_INFO[num_rep][3] = SC_ANAL_FWHM        # = summary_data[0][3];
+                   SCAN_INFO[num_rep][4] = SC_ANAL_CFWHM       # = summary_data[0][4];
+                   SCAN_INFO[num_rep][5] = SC_ANAL_LHMX        # = summary_data[0][5];
+                   SCAN_INFO[num_rep][6] = SC_ANAL_UHMX        # = summary_data[0][6];
+                   SCAN_INFO[num_rep][7] = SC_ANAL_I           # = summary_data[0][7];
+                   SCAN_INFO[num_rep][8] = SC_ANAL_PRSD        # = summary_data[0][8];
+                   SCAN_INFO[num_rep][8] = SC_ANAL_Itot        # = summary_data[0][9];
+                   SCAN_INFO[num_rep][8] = SC_ANAL_BGR         # = summary_data[0][10];
+                   SCAN_INFO[num_rep][8] = SC_ANAL_AVE_BGR     # = summary_data[0][11];
+
+                   # if its ok move on
+                   if (bad[num_rep] == 0) exec = 0;
+
+                   # print some info about the scan 
+                   msg_str = sprintf("#RS_BAD_IDX %d", bad[num_rep] );
+                   if (DATAFILE !=""){
+                       fprintf(DATAFILE,"%s\n", msg_str); 
+                   }
+                   num_rep = num_rep + 1;                   
+              }  
+              #### end of while loop on the scan
+              # print some info about the avg scan?? .....
+                { 
+                 local print_str
+                 print_str = sprintf("%s, num_rep=%d, last scan=%d, BAD=%d", \
+                            RS_SCAN_TITLE,num_rep+1, SCAN_N, SCAN_INFO[0][0]);
+                 printf("%s\n",print_str);
+	           print_str = sprintf("#RS_ANAL2 Y_max=%g, at X=%g, fwhm=%g, cfwhm=%g, lhmx=%g, uhmx=%g", \
+                            SCAN_INFO[0][1], SCAN_INFO[0][2], \
+                            SCAN_INFO[0][3], SCAN_INFO[0][4], \
+                            SCAN_INFO[0][5], SCAN_INFO[0][6] ) 
+                 printf("%s\n",print_str);
+	           print_str = sprintf("#RS_ANAL3 I=%g, prsd=%g, Itot=%g, BGR=%g, AVE_BGR=%g", \
+                             SCAN_INFO[0][7], SCAN_INFO[0][8],      \
+                             SCAN_INFO[0][9], SCAN_INFO[0][10], \
+                             SCAN_INFO[0][11]) 
+                 printf("%s\n\n",print_str);
+                }
+           }
+       }
+       ######### end L loop#########
+########## check the scan #############
+} else {
+       # check out the scan info
+       local tot_time, j, k;
+       tot_time = 0;
+       p "test scan info"
+       p "       H      K      L     cnt      I      b_flag    Alpha    Beta"
+       for (j=0;j<num_l_pts;j++){
+           # calulate the angles for all the HKL
+           H = RS_ARRAY[j][0]; 
+           K = RS_ARRAY[j][1]; 
+           L = RS_ARRAY[j][2];
+           calcA
+
+           msg_str="";        
+           for(k=0;k<6;k++){
+            msg_str = sprintf("%s  %6.5g", msg_str, RS_ARRAY[j][k]);
+           }
+           msg_str = sprintf("%s  %6.5g   %6.5g", msg_str, ALPHA, BETA);
+           msg_str = sprintf("%s \n", msg_str);
+           p msg_str;
+           tot_time = tot_time + RS_ARRAY[j][3]*num_scan_pts;
+       }  
+       # reset to current position
+       get_angles; calcHKL
+    
+       p "Number of points = ", num_l_pts
+       p "Estimated total time (sec) = ", tot_time 
+       p "Estimated total time (min) = ", tot_time / 60 
+       p "Estimated total time (hrs) = ", tot_time / 3600 
+      
+}
+####### end of scan loop
+
+# cleanup
+rod_scan_cleanup;
+
+}'
+
+###################################################################################
+# rod_scan_cleanup
+def rod_scan_cleanup '{
+   IS_ROD_SCAN = FALSE;
+}'
+####################################################################
+
+
+

@@ -1,0 +1,21 @@
+# traj_scans.mac
+# Scan macros for trajectory scanning with EPICS and the MM4005
+#
+#               Mark Rivers
+#               August 20, 2000
+#
+# This file defines macros to turn trajectory scanning on and off
+
+def traj_scans_on '{
+    local t
+    t = SPECD "/traj_scans1.mac"
+    qdofile(t)
+}'
+
+def traj_scans_off '{
+    local t
+    t = SPECD "/scans1.mac"
+    qdofile(t)
+    t = SPECD "/scans.mac"
+    qdofile(t)
+}'

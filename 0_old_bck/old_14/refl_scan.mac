@@ -1,0 +1,58 @@
+# do reflectivity rocking scans
+# NOTE UNTESTED!!!!!
+#
+# inputs
+# - flat phi and flat chi
+# - start in eta units, end in eta units, spacing in eta units
+# - width of rocking scan
+
+def refl_scan_vert '{
+
+    # check input
+    if ($# != 9 ) {
+      #                              1       2        3        4         5         6
+      msg_str = "Usage: refl_scan  eta_st  eta_end  del_eta  cnt_time  flat_phi  flat_chi" 
+      print msg_str
+      exit
+    } 
+
+    local num_sc_pts
+    # calc num points
+    if ($2 < $1) {
+         print "end eta is less than start eta "
+         exit
+    }
+         
+    num_sc_pts = 1 + int( ($2 - $1)/$3 );
+    if (num_sc_pts < 1) {
+        print " Error: Num points < 1 "
+        exit
+    }
+    d_eta = ($2 - $1)/(num_sc_pts-1)
+
+    cnt_time = $4
+    
+    eta_start = $1      ;      mv eta eta_start
+    del_start = 2*($1)  ;      mv del del_start
+    phi_start = $5      ;      mv phi phi_start 
+    chi_start = 90 + $6 ;      mv chi chi_start
+
+    j = 0;
+    while(1){ 
+        eta_val = (eta_start + j*d_eta)
+        del_val = (del_start + 2*j*d_eta)
+        p "Move eta to:" eta_val;  mv eta eta_val
+        p "Move del to:" del_val;  mv del del_val
+        dscan  eta -0.04 0.04 30 cnt_time
+        test_sat = CHECK_SAT(1)
+        if( test_sat == 0 ){
+            j++;
+        } else {
+            j--;
+            if (j<0) j=0;
+        }
+        if ( j > num_sc_pts) break;
+    }
+
+   
+}'
