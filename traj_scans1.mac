@@ -796,13 +796,7 @@ def traj_read_counts '{
          _ndets = MAX_TRAJ_MCS
     }
     for (i=0; i<_ndets; i++) {
-        # Note: the new SIS code means that first pulse arms the SIS.  This means first
-        # scan point is not counted.  Fix this in hardware, but for now do software kludge
-        #_traj_counts[i][0:_npts-1] = epics_get(TRAJ_MCS_NAME[i])
-        # Read into where data actually begins
-        _traj_counts[i][1:_npts-1] = epics_get(TRAJ_MCS_NAME[i])
-        # Duplicate second point into first point
-        _traj_counts[i][0]= _traj_counts[i][1]
+        _traj_counts[i][0:_npts-1] = epics_get(TRAJ_MCS_NAME[i])
     }
 }'
 
