@@ -1,9 +1,3 @@
-Note: There is a bug in compound motor trajectory scanning.  The first delta
-in the scan is 0 distance, because it is multiplying by NPTS, rather than
-NPTS+1.  This should be fixed.  This applies to lots of kinds of scans (HKL,
-ascan with compound motor, etc.) This also applies to computed readback
-values?
-
 ###################### FILES ####################################
  
 -  The standard spec macros are
