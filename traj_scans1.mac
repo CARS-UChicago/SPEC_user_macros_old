@@ -121,7 +121,7 @@ def _ascan '{
         for (NPTS=0; NPTS < _n1; NPTS++) {
             # Remember current position of all motors
             _A0 = A
-            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + NPTS * _d[i]
+            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS+1) * _d[i]
             calcR_fromP
             for (i=0;i<MAX_TRAJ_INDEX;i++) {
                 # Take the computed positions of the motor and define this 
@@ -365,9 +365,9 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
     # Build trajectory
     for (NPTS=0; NPTS < _n1; NPTS++) {
         _A0 = A
-        H = h_ca = _s1 + NPTS*_d1
-        K = k_ca = _s2 + NPTS*_d2
-        L = l_ca = _s3 + NPTS*_d3
+        H = h_ca = _s1 + (NPTS+1)*_d1
+        K = k_ca = _s2 + (NPTS+1)*_d2
+        L = l_ca = _s3 + (NPTS+1)*_d3
         get_angles; calcA
         for(i=0;i<MAX_TRAJ_INDEX;i++) {
             # Take the computed positions of the motor and define this 
@@ -402,9 +402,9 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
             # for the print statement
             h_ca = H; k_ca = K; l_ca = L;
         } else {
-            H = h_ca = _s1 + NPTS*_d1
-            K = k_ca = _s2 + NPTS*_d2
-            L = l_ca = _s3 + NPTS*_d3
+            H = h_ca = _s1 + (NPTS+1)*_d1
+            K = k_ca = _s2 + (NPTS+1)*_d2
+            L = l_ca = _s3 + (NPTS+1)*_d3
             get_angles; calcA
         }
         for (i=0;i<COUNTERS;i++) S[i]=_traj_counts[i][NPTS]
@@ -451,7 +451,7 @@ def _hklmesh '{
         for (NPTS=0; NPTS < _n1; NPTS++) {
             # Remember previous positions (ie calc relative)
             _A0 = A
-            Q[_m1] = _ca[_m1] = _s1 + NPTS * _d1
+            Q[_m1] = _ca[_m1] = _s1 + (NPTS+1) * _d1
             Q[_m3] = _ca[_m3]
             get_angles; calcA
             for(i=0;i<MAX_TRAJ_INDEX;i++) {
@@ -484,7 +484,7 @@ def _hklmesh '{
                 calcP_fromR
                 calcHKL
             } else {
-                Q[_m1] = _ca[_m1] = _s1 + NPTS * _d1
+                Q[_m1] = _ca[_m1] = _s1 + (NPTS+1) * _d1
                 Q[_m3] = _ca[_m3]
                 get_angles; calcA
             }
@@ -561,7 +561,7 @@ def _hklline '{
     _A0 = A
     # Build trajectory
     for (NPTS=0; NPTS < _n1; NPTS++) {
-        _x = _s1 + NPTS * _d1
+        _x = _s1 + (NPTS+1) * _d1
         _hkl _x
         if ("$6" != "0") $6
         h_ca = H; k_ca = K; l_ca = L
@@ -596,7 +596,7 @@ def _hklline '{
             calcP_fromR
             calcHKL
         } else {
-            _x = _s1 + NPTS * _d1
+            _x = _s1 + (NPTS+1) * _d1
             _hkl _x
             if ("$6" != "0") $6
             h_ca = H; k_ca = K; l_ca = L
