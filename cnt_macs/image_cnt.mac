@@ -1,0 +1,183 @@
+############################################################################
+## epics_PILATUS_count  March 2007 SKG
+## use to trigger a PILATUS Detetor
+## To read the rois for the PILATUS see the user_getcounts macro
+############################################################################ 
+
+# globals
+global PILATUS_PREFIX
+global PILATUS_IMAGE_DIR
+global PILATUS_WRITE_FILES
+
+if( unset("PILATUS_PREFIX") ) PILATUS_PREFIX = ""
+if( unset("PILATUS_IMAGE_DIR") ) PILATUS_IMAGE_DIR = ""
+if( unset("PILATUS_WRITE_FILES") ) PILATUS_WRITE_FILES = FALSE
+
+
+# need some more globals (kludge)
+global    PILATUS_ROI_PV    
+global    PILATUS_IMGPATH_PV
+global    PILATUS_FNAME_PV
+global    PILATUS_FILENUMBER_PV
+global    PILATUS_FILEFORMAT_PV
+global    PILATUS_EXPSRTM_PV
+global    PILATUS_NFRAME_PV
+global    PILATUS_EXPPRD_PV
+global    PILATUS_NEXPFRM_PV
+global    PILATUS_ACQ_PV
+global    PILATUS_ACQMODE_PV
+
+###############################################################
+def _setup_img '{
+     local j, str
+		
+     # PILATUS_PREFIX should be detector aquisition pv (GSE-PILATUS1:)
+     if ( PILATUS_PREFIX == "") PILATUS_PREFIX = "GSE-PILATUS1:"
+     PILATUS_PREFIX = getval("Enter PILATUS pv prefix",PILATUS_PREFIX)
+
+     # rois pvs
+     PILATUS_ROI_PV    = PILATUS_PREFIX "ROI1NetCounts"
+     PILATUS_IMGPATH_PV = PILATUS_PREFIX "FilePath"
+     PILATUS_FNAME_PV   = PILATUS_PREFIX "Filename"
+     PILATUS_FILENUMBER_PV   = PILATUS_PREFIX "FileNumber"
+     PILATUS_FILEFORMAT_PV = PILATUS_PREFIX "FileFormat"
+     PILATUS_EXPSRTM_PV = PILATUS_PREFIX "ExposureTime"
+     PILATUS_NFRAME_PV  = PILATUS_PREFIX "NImages"
+     PILATUS_EXPPRD_PV  = PILATUS_PREFIX "ExposurePeriod"
+     PILATUS_NEXPFRM_PV = PILATUS_PREFIX "NExposures"
+     PILATUS_ACQ_PV     = PILATUS_PREFIX "Acquire"
+     PILATUS_ACQMODE_PV = PILATUS_PREFIX "AcquireMode"
+
+     # Build directory name.  Here we hard wire in some stuff
+     # IMAGE_DIR = ~/gpd/year/XXX/YYY/.../images
+     # must be less than 40 chars!
+     CURRENT_DIR = CWD
+     #dstr = split(CURRENT_DIR,splt_dstr,"/gpd_user/")
+     #PILATUS_IMAGE_DIR= sprintf("~/gpd/%s/images",splt_dstr[1])
+     dstr = split(CURRENT_DIR,splt_dstr,"/cars5/") 
+     PILATUS_IMAGE_DIR= sprintf("~/cars5/%s/images",splt_dstr[1]) 
+     print "Pilatus Image directory = ", PILATUS_IMAGE_DIR
+      ct
+}'
+
+#def set_img_roi '{
+#
+# # prompt for roi vals and post to roi xy pvs
+#
+#}'
+
+
+##############################################################
+def _img_on '{ 
+
+   if (PILATUS_PREFIX == ""){
+       eprint "PILATUS_PREFIX unset, run setup_pilatus first!"
+       exit
+   }
+
+   if ($# < 1){
+      PILATUS_WRITE_FILES = getval("Enter 1 to write image files, 0 for off",PILATUS_WRITE_FILES)
+   } else {
+      PILATUS_WRITE_FILES = $1
+      print "PILATUS_WRITE_FILES=", PILATUS_WRITE_FILES
+   }
+
+}'
+
+def img_cnt ' epics_pilatus_count '
+
+########################################################
+##
+## triggers PILATUS detector, manage file storage
+## 
+def epics_pilatus_count '{
+     # local cnt_time_val, sc_pv, PILATUS_PREFIX
+     # local pilatus_prtm_pv, pilatus_expsr_pv, pilatus_status_pv   
+
+     if ($# != 1){
+         cnt_time_val = 1
+     } else {
+         cnt_time_val = $1
+     } 
+
+     if (PILATUS_PREFIX == ""){
+         eprint "PILATUS_PREFIX unset"
+         exit
+     }
+
+     # base pv names, assume scaler 0 is an epics device
+     # thats being used for all the scaler detectors
+     sc_pv = counter_par(0,"device_id");
+
+     # preset time and count for scaler
+     sc_prtm_pv = sprintf("%s.%s",sc_pv,"TP") 
+     sc_cnt_pv  = sprintf("%s.%s",sc_pv,"CNT")
+
+     # PILATUS detector data aquisition pvs
+     # imgpath, fname,expsr time, nframe, expprd, nexpfrm
+
+     # make file name field newfile_SCAN_N
+     if (PILATUS_WRITE_FILES){  
+         img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
+         _fileformat = "%s%s_%.3d.tif"
+         #print img_fname
+     } else {
+         img_fname = "000test"
+         _fileformat = "%s%s.tif"
+         #print img_fname
+     }
+
+     # write to data base fields
+     # Need to convert path from string to byte array
+     array _temp[256]
+     _temp = PILATUS_IMAGE_DIR
+     epics_put(PILATUS_IMGPATH_PV,_temp)
+     epics_put(PILATUS_FNAME_PV,img_fname)
+     epics_put(PILATUS_FILENUMBER_PV,NPTS)
+     epics_put(PILATUS_FILEFORMAT_PV,_fileformat)
+     epics_put(sc_prtm_pv,cnt_time_val)
+     epics_put(PILATUS_EXPSRTM_PV,cnt_time_val)
+     epics_put(PILATUS_ACQMODE_PV,0)  # Internal trigger 
+     epics_put(PILATUS_NFRAME_PV, 1)
+     epics_put(PILATUS_NEXPFRM_PV, 1)
+     #We need to sleep here to make sure the setup commands
+     # are recived by camserver before hitting the aquire button
+     sleep(.05)
+
+     # user pre count stuff
+     user_precount
+
+     # hit the triggers
+     epics_put(PILATUS_ACQ_PV,1)
+
+     epics_put(sc_cnt_pv,1)
+
+     # wait for scaler and Pilatus AQG to finish
+     status     = 1
+     sc_done    = FALSE
+     img_done   = FALSE
+     data_done  = FALSE
+     while(status){
+         # is the scalar done
+        if (epics_get(sc_cnt_pv)=="Done"){
+             sc_done = TRUE;
+             #p "scaler done"
+        }
+
+        # is the pilatus done
+        if (epics_get(PILATUS_ACQ_PV) == "Done"){
+            img_done = TRUE;
+            #p "image collection done"
+        }
+
+        if( (sc_done==TRUE) && (img_done==TRUE)) break;
+        sleep(0.01)
+     }
+
+    
+     # use the get_counts routine to read the scalers
+     # note get_counts also calls user_getcounts
+     # thats where the rois get read.
+     get_counts  
+}'
+

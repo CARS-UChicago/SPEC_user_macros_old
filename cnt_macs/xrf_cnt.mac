@@ -1,0 +1,205 @@
+############################################################################
+## epics_xrf_count  March 2007 SKG
+## This routine is used in place of specs count routine when you want 
+## run with an MED detector.  
+## To read the rois for the MED see the user_getcounts macro
+############################################################################# 
+
+# globals
+global XRF_PV
+global XRF_DATA_DIR
+global XRF_NUM_DET
+global XRF_WRITE_FILES
+
+if( unset("XRF_PV") )            XRF_PV = ""
+if( unset("XRF_WRITE_FILES") )   XRF_WRITE_FILES = FALSE
+
+
+#if( unset("XRF_NUM_DET") )      XRF_NUM_DET = 8
+# note below array will not get restored after quitting spec
+#if( EPICS_COUNT_SETUP[3] == 0 ) array XRF_BAD_DETS[8]
+
+##############################################################################
+def _setup_xrf '{
+    local j, str
+		
+    # XRF_PV should be detector aquisition pv (13XRM:mca1)
+    XRF_PV = getval("Enter XRF pv prefix ",XRF_PV)
+
+    # enter the comple data director information where you work
+    # /cars5/data/gpd_user/YYYY/MMM/XSW/NAME
+    # CWD spec command gives current working directory
+    # like /home/idc_user/cars5/Data/gpd_user/2007/March/XSW/SANJIT
+
+    CURRENT_DIR = CWD
+    dstr = split(CURRENT_DIR,splt_dstr,"/gpd_user/")
+    XRF_DATA_DIR = sprintf("/cars5/Data/gpd_user/%s",splt_dstr[1])
+    printf("HOST DATA DIRECTORY = %s/xrf_files\n",XRF_DATA_DIR)
+
+    #GET_XRF_DIR = 1
+    #GET_XRF_DIR = getval("Enter 1 if correct, 0 for incorrect",GET_XRF_DIR)
+    #if(GET_XRF_DIR == 0){ 
+    #    XRF_DATA_DIR = getval("Enter xrf data dir",XRF_DATA_DIR)
+    #}     
+}'
+
+##############################################################
+# pass a TRUE/FALSE argument to control file writing
+def _xrf_on '{ 
+
+   if (XRF_PV == ""){
+       eprint "XRF_PV unset, run setup_xrf first!"
+       exit
+   }
+
+   if ($# < 1){
+      XRF_WRITE_FILES = getval("Enter 1 to write xrf files, 0 for off",XRF_WRITE_FILES)
+   } else {
+      XRF_WRITE_FILES = $1
+      print "XRF_WRITE_FILES=", XRF_WRITE_FILES
+   }
+
+}'
+
+def xrf_cnt ' epics_xrf_count '
+
+########################################################
+## SKG March 2007
+##  New version reads mca, triggers detector, manage file store
+## 
+def epics_xrf_count '{
+     # local cnt_time_val, sc_pv, xrf_pv
+     # local sc_prtm_pv, sc_cnt_pv  
+     # local xrf_prtm_pv, xrf_cnt_pv, xrf_acq_pv   
+
+     if ($# != 1){
+         cnt_time_val = 1
+     } else {
+         cnt_time_val = $1
+     } 
+
+     if (XRF_PV == ""){
+         eprint "XRF_PV unset"
+         exit
+     }
+
+     # base pv names, assume scaler 0 is an epics device
+     # thats being used for all the scaler detectors
+     sc_pv = counter_par(0,"device_id");
+
+     # preset time and count for scaler
+     sc_prtm_pv = sprintf("%s.%s",sc_pv,"TP") 
+     sc_cnt_pv  = sprintf("%s.%s",sc_pv,"CNT")
+
+     # XRF detector data aquisition pvs
+     # preset time, EraseStart, Aquiring, mode
+     xrf_pv = XRF_PV;
+     xrf_prtm_pv = sprintf("%s.%s",xrf_pv,"PRTM")
+     xrf_cnt_pv  = sprintf("%s%s",xrf_pv,"EraseStart")
+     xrf_acq_pv  = sprintf("%s.%s",xrf_pv,"ACQG")
+     
+     # Put the write file  information to different DATA fields
+     # For the host(/cars5/Data), folder(/gpd_user/2007/test/subdir)
+     # Base file name (sample1_dec09), File format(%s.%.3i), File extension)
+     
+     # detector data handling base pvs
+     data_mode_pv       = "13XRM:XRF:Mode"
+     data_host_pv       = "13XRM:XRF:host"
+     data_folder_pv     = "13XRM:XRF:dir"
+     data_sfolder_pv    = "13XRM:XRF:subdir"
+     data_filebase_pv   = "13XRM:XRF:filebase"
+     data_fileformat_pv = "13XRM:XRF:format"
+     data_fileext_pv    = "13XRM:XRF:fileext"
+     data_mode_pv       = "13XRM:XRF:Mode"
+     data_request_pv    = "13XRM:XRF:Request"
+     data_status_pv     = "13XRM:XRF:Status"
+   
+     # make data host name field         
+     hstr = split(XRF_DATA_DIR,splt_hstr,"/")
+     data_host= sprintf("%s",splt_hstr[0])
+     for (i=1; i<hstr-1;i++){ 
+    	   data_host = sprintf("%s/%s",data_host,splt_hstr[i])
+     }
+     
+     # make data folder name field xsw/name/xrf_files
+     data_folder = sprintf("/%s/%s",splt_hstr[hstr-1],"xrf_files")
+     
+     # make sub folder name field spc_file/SCAN_N
+     fnstr = split(DATAFILE,splt_str,".") 
+     data_sub_folder = sprintf("/%s/%.3d",splt_str[0],SCAN_N)
+
+     # make file name field newfile_SCAN_N
+     data_fname = sprintf("%s_%.3d",DATAFILE,SCAN_N)
+   
+     # make file name format field
+     data_ffname = "%s.%.3i"
+
+     # make file name extension field
+     data_fext = sprintf("%.3d",NPTS)
+
+
+     # change the Data Collection mode to Automatic
+     if(XRF_WRITE_FILES){
+	     epics_put(data_mode_pv,"Automatic")
+     }else{
+          epics_put(data_mode_pv,"Manual")
+     }
+
+     # put to the other data field
+     epics_put(data_host_pv,data_host)
+     epics_put(data_folder_pv,data_folder)
+     epics_put(data_sfolder_pv,data_sub_folder)
+     epics_put(data_filebase_pv,data_fname)
+     epics_put(data_fileformat_pv,data_ffname)
+     epics_put(data_fileext_pv,data_fext)
+
+     # put the count times
+     epics_put(sc_prtm_pv,cnt_time_val)
+     epics_put(xrf_prtm_pv,cnt_time_val) 
+
+     # user pre count stuff
+     user_precount
+
+     # hit the triggers
+     xx_cnt = 0
+     epics_put(xrf_cnt_pv,1)
+     while( epics_get(xrf_acq_pv,"short") == 0){
+         sleep(0.05);
+         xx_cnt = xx_cnt + 1;         
+         if (xx_cnt > 20){
+             xx_cnt = 0;
+             print "Warning waiting for XRF aquiring";
+         }
+     }
+     epics_put(sc_cnt_pv,1)
+
+     # wait for scaler and XRF AQG to finish
+     status = 1
+     sc_done = FALSE
+     xrf_done = FALSE
+     data_done  = FALSE
+     while(status){
+        sleep(0.3)
+        if (epics_get(sc_cnt_pv)=="Done"){
+             sc_done = TRUE;
+             #p "scaler done"
+        }
+        if (epics_get(xrf_acq_pv,"short") == 0){
+            xrf_done = TRUE;
+            #p "xrf collection done"
+        }
+      
+        if( (sc_done==TRUE) && (xrf_done==TRUE) ) status = 0;
+     }
+    
+     # use the get_counts routine to read the scalers
+     # note get_counts also calls user_getcounts
+     # thats where the rois get read.
+     get_counts  
+     sleep(.3)
+
+     # change the Data Collection mode to Manual
+     epics_put(data_mode_pv,"Manual")
+     sleep(.3)
+
+}'

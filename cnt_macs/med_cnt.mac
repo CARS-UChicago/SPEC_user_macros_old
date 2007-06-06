@@ -1,0 +1,177 @@
+############################################################################
+## epics_med_count
+## use to trigger an epics MED and an epics scaler
+## This routine is used in place of specs count routine when you want 
+## run with an MED and scaler. 
+## To read the rois for the MED see the user_getcounts macro
+############################################################################# 
+
+# globals
+global MED_PV
+global MED_NUM_DET
+global MED_WRITE_FILES
+array  ICR_ARRAY[4]
+
+if( unset("MED_PV") )               MED_PV = ""
+if( unset("MED_NUM_DET") )          MED_NUM_DET = 8
+if( unset("MED_WRITE_FILES") )      MED_WRITE_FILES = FALSE
+
+# note below array will not get restored after quitting spec
+if( EPICS_COUNT_SETUP[2] == 0 )     array MED_BAD_DETS[8]
+
+#################################################################
+def _setup_med '{
+     local j, str
+
+     MED_PV = getval("Enter MED pv prefix",MED_PV)
+     MED_NUM_DET = getval("Enter the number of detectors",MED_NUM_DET)
+     for(j=0;j<MED_NUM_DET;j++){
+         str = "Enter 1 if detector is bad, 0 for ok: det "
+         str = sprintf("%s %d",str, j+1)
+         MED_BAD_DETS[j] = getval(str,MED_BAD_DETS[j])
+     }
+     med_cw_desc_pv = sprintf("%s%s",MED_PV,"ClientWait.DESC")
+     epics_put(med_cw_desc_pv,"spec_default.dat")
+}'
+
+##############################################################
+# pass a TRUE/FALSE argument to control file writing
+def _med_on '{ 
+
+   if (MED_PV == ""){
+       eprint "MED_PV unset, run setup_med first!"
+       exit
+   }
+   if ($# < 1){
+      MED_WRITE_FILES = getval("Enter 1 to write med files, 0 for off",MED_WRITE_FILES)
+      #if (MED_WRITE_FILES){
+      #  # this only works with python version
+      #  # MED_DATA_DIR = getval("Enter med data dir",MED_DATA_DIR)
+      #}
+   } else {
+      MED_WRITE_FILES = $1
+   }
+
+}'
+
+def med_cnt ' epics_med_count '
+
+#######################################################################
+##   
+def epics_med_count '{
+     # local cnt_time_val, sc_pv, med_pv
+     # local sc_prtm_pv, sc_cnt_pv  
+     # local med_prtm_pv, med_cnt_pv, med_acq_pv   
+
+     if ($# != 1){
+         cnt_time_val = 1
+     } else {
+         cnt_time_val = $1
+     } 
+
+     if (MED_PV == ""){
+         eprint "MED_PV unset"
+         exit
+     }
+
+     # base pv names, assume scaler 0 is an epics device
+     # thats being used for all the scaler detectors
+     sc_pv = counter_par(0,"device_id");
+     med_pv = MED_PV;
+
+     # preset time and count for scaler
+     sc_prtm_pv = sprintf("%s.%s",sc_pv,"TP") 
+     sc_cnt_pv  = sprintf("%s.%s",sc_pv,"CNT")
+
+     # preset time, EraseStart, Aquiring
+     # and client wait pvs
+     med_prtm_pv    = sprintf("%s%s",med_pv,"PresetReal")
+     med_cnt_pv     = sprintf("%s%s",med_pv,"EraseStart")
+     #med_cnt_pv    = sprintf("%s%s",med_pv,"StartAll")
+     med_acq_pv     = sprintf("%s%s",med_pv,"Acquiring")
+     med_ecw_pv     = sprintf("%s%s",med_pv,"EnableClientWait")
+     med_cw_pv      = sprintf("%s%s",med_pv,"ClientWait")
+     med_cw_desc_pv = sprintf("%s%s",med_pv,"ClientWait.DESC")
+
+     # put the count times
+     epics_put(sc_prtm_pv,cnt_time_val)
+     epics_put(med_prtm_pv,cnt_time_val)
+ 
+
+     # put the file name in case we are dumping spectra files
+     {
+     #med_fname = DATAFILE "_" SCAN_N "_" NPTS ".xrf"
+     #med_fname = sprintf("%s_%.3d_%.3d.xrf",splt_str[nstr-1],SCAN_N,NPTS)
+     nstr = split(DATAFILE,splt_str,"/") 
+     med_fname = sprintf("%s_%.3d.%.3d",splt_str[nstr-1],SCAN_N,NPTS)
+     epics_put(med_cw_desc_pv,med_fname)
+     #xx = epics_get(med_cw_desc_pv)
+     #print xx
+     sleep(0.3)
+     epics_put(med_cw_desc_pv,med_fname)
+     #sleep(0.1)
+     epics_put(med_cw_desc_pv,med_fname)
+     }
+
+     # user pre count stuff
+     user_precount
+
+     # hit the triggers
+     xx_cnt = 0
+     epics_put(med_cnt_pv,1)
+     while( epics_get(med_acq_pv,"short") == 0){
+         sleep(0.05);
+         xx_cnt = xx_cnt + 1;         
+         if (xx_cnt > 20){
+             xx_cnt = 0;
+             print "Warning waiting for med aquiring";
+         }
+     }
+     epics_put(sc_cnt_pv,1)
+
+     # wait for scaler and med to finish
+     status = 1
+     sc_done = FALSE
+     med_done = FALSE
+     cw_busy  = FALSE
+     while(status){
+        sleep(0.3)
+        if (epics_get(sc_cnt_pv)=="Done"){
+             sc_done = TRUE;
+             #p "scaler done"
+        }
+        if (epics_get(med_acq_pv,"short") == 0){
+            med_done = TRUE;
+            #p "med done"
+        }
+        if (MED_WRITE_FILES==TRUE){
+           # wait for client wait to go done if 
+           # client wait is enabled
+           if( epics_get(med_ecw_pv,"short") == 1){
+               cw_busy =  epics_get(med_cw_pv,"short")
+           }
+        } else {
+           cw_busy = FALSE
+        }
+        if( (sc_done==TRUE) && (med_done==TRUE) && (cw_busy==FALSE) ) status = 0;
+     }
+
+     # if client wait is enabled wait for the client wait
+     # field to go done
+     #p "here"
+     #p epics_get(med_ecw_pv,"short") 
+     #if( epics_get(med_ecw_pv,"short") == 1){
+     #   p epics_get(med_cw_pv,"short")
+     #   while( epics_get(med_cw_pv,"short") == 1) {
+     #       sleep(0.1);
+     #       p "waiting for client"
+     #   }
+     #}
+
+     # use the get_counts routine to read the scalers
+     # note get_counts also calls user_getcounts
+     # thats where the rois get read.
+     get_counts  
+     sleep(1)
+
+}'

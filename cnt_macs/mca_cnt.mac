@@ -1,0 +1,45 @@
+############################################################################
+## setup mca detectors
+## use this macro to set up the use of mca detector
+## This assumes that the mca is set up in the spec config file
+###########################################################################
+
+## globals
+global MCA_ROI_PV_NAME
+global MCA_ROI_PV_NAME_2
+global MCA_ROI_PV_NAME_3
+
+if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME = "";
+if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME_2 = "";
+if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME_3 = "";
+
+
+def _setup_mca '{
+     local num_mca, j
+     num_mca = mca_sel("?")
+
+     # loop through and disable all the devices
+     for (j=0;j<num_mca;j++)  mca_spar(j,"disable",1)
+
+     # If we can get the device names ...
+     # name = mca_par("device_id")
+     # or mca_spar(j,"device_id")
+     # then print the options and choose the detector from the list
+     #
+     # select the detector
+     # mca_sel(xx)
+     # this is now the detector which gets all the mca_par calls..
+     #
+     # enable the detector
+     # and turn on reset (ie erase before start )
+     mca_par("disable",0)
+     mca_par("soft_preset",1)
+
+     # below we should get automatically..
+     # if we have the det names
+     MCA_ROI_PV_NAME    = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME);
+     MCA_ROI_PV_NAME_2  = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME_2);
+     MCA_ROI_PV_NAME_3  = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME_3);
+
+}'
+
