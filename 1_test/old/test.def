@@ -1,6 +1,0 @@
-# use this to play around with macros ....
-def test '
-eprint "Usage: rod_scan H K L_start L_end Min_count Max_repeat L_bragg0 Delta_L\n "
-
-'
-
