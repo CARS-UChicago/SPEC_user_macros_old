@@ -148,7 +148,7 @@ def th2th '{
 
 ####################################################################
 ## reflectivity scan 
-def rlf '{
+def rlf_vert '{
 	if ($# != 4) {
       eprint "Usage:  rlf eta_start eta_finish intervals time"	
       exit
@@ -169,6 +169,24 @@ def rlf_horz '{
 	a2scan mu ($1) ($2) nu ($1)*2 ($2)*2  $3 $4
 }'
 ####################################################################
+
+
+####################################################################
+## reflectivity scan, off specular 
+## Note just using a nu offset.  This gives an essentially constant 
+## delta Q for small angles ie 
+## del_Q = (4pi/lam) (sin(nu/2 + dnu) - sin(nu/2 + del_nu)) ~ del_nu
+##
+def rlf_horz_off '{
+	if ($# != 5) {
+      eprint "Usage:  rlf_horz mu_start mu_finish intervals time nu_offset"	
+      exit
+	} 
+      ##Usage:  a2scan  motor1 s1 f1  motor2 s2 f2  intervals time"
+	a2scan mu ($1) ($2) nu ($1)*2+nu_offset ($2)*2+nu_offset  $3 $4
+}'
+####################################################################
+
 
 ############################################################################################
 # Peak - Iterate on center.
