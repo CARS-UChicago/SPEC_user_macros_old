@@ -1,5 +1,11 @@
 # point_scans1.mac
-#
+
+##########################################################################
+#  Changed the hkl scan file header to write the angles in the *.spc file
+# for getting the angles in the SPC file for each NPTS of lscan specific 
+#to Pilatrus detector   SKG April 2007
+#########################################################################
+
 # This file provides re-implements the following standard SPEC macros 
 # from "standard.mac".  These macros get redefined when doing trajectory
 # scans, therefore must be re-implemented for point scanning.
@@ -234,7 +240,7 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
 		{ X_L = "H"; _sx = _s1; _fx = _f1 }
 	Y_L = cnt_name(DET)
 	_stype = 2
-	FPRNT="H  K  L  "
+	FPRNT="H  K  L  del  eta  chi  phi  nu  mu  "
 	PPRNT=""
 	{
 	 local i
@@ -251,7 +257,10 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
 		L = l_ca = _s3 + NPTS*_d3
 		get_angles; calcA
 		scan_move
-		FPRNT=sprintf("%g %g %g ",h_ca,k_ca,l_ca)
+            FPRNT=sprintf("%g %g %g ",h_ca,k_ca,l_ca)
+		for (m=0;m<6;m++){
+			FPRNT=sprintf("%s  %8.4f ",FPRNT,A[mA[m]])
+		}
 		PPRNT=""
 		for (i=0;i<_numgeo;i++)
 			PPRNT=sprintf("%s%8.4f ",PPRNT,A[mA[i]])
