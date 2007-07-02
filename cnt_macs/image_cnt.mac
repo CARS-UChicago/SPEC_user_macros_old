@@ -142,7 +142,7 @@ def epics_pilatus_count '{
      epics_put(PILATUS_NEXPFRM_PV, 1)
      #We need to sleep here to make sure the setup commands
      # are recived by camserver before hitting the aquire button
-     sleep(.05)
+     sleep(.09)
 
      # user pre count stuff
      user_precount
