@@ -1,0 +1,242 @@
+##################################################################################
+# RAPID 2D SCANS ............SKG.......2005-I run..............................
+# keta_mesh_scan ---> do keta scans as at different H at fixed alpha and Qz (L)
+# for 2d crystal scan on crystal
+# get_user_lim ---> to get user_limit of different motors
+# setup_restore ---> restores all old settings for mode and freeze values
+#
+def keta_mesh_scan '{
+
+    # check input
+    if ($# != 9 ) {
+      #                            		1     2      3          4          5
+      msg_str = "Usage: keta_mesh_scan  H_st  H_end  num_H_pts  omega_st  del_omega"  
+      #			   6              7        8      9	
+      msg_str = msg_str "  num_omega_pts  sc_cnt   alpha  L " 
+      print msg_str
+      exit
+    } 
+
+    local H_st, H_en, num_H_pts, sc_cnt_time, omega_st, del_omega;
+    local num_omega_pts, alp_val,L_val;
+    H_st = $1;
+    H_en = $2;
+    num_H_pts = $3;
+    omega_st = $4;
+    del_omega = $5;
+    num_omega_pts = $6
+    sc_cnt_time = $7;
+    alp_val = $8;
+    L_val = $9;
+   
+    local d_H
+    # calc delta
+    if (num_H_pts < 1) {
+       print " Error: Num points < 1 "
+       exit
+    }
+    d_H = ($2 - $1)/(num_H_pts)
+    
+    # get current setmode, freeze, g_sect, and g_prefer parameters
+    cur_mode1 = g_mode1
+    cur_mode2 = g_mode2
+    cur_mode3 = g_mode3
+    cur_mode4 = g_mode4
+    cur_mode5 = g_mode5
+
+    # g_prefer = G[0] and g_sect = G[1]    
+    g_sect_cur   = G[1]
+    g_prefer_cur = G[0]
+
+    # ALPHA value
+    old_alpha = ALPHA;
+    #p " OLD SETMODE = " g_mode1,g_mode2,g_mode3,g_mode4;
+    #p " OLD g_sect and g_prefer = " g_sect_cur,g_prefer_cur; 
+
+    # set different modes
+    setmode 0 2 3 4
+
+    # freezing alpha,chi and phi 
+    # freeze F_ALPHA FLAT_CHI FLAT_PHI are GLOBAL
+    g_frz = 1;
+    F_ALPHA = alp_val;
+    F_CHI = FLAT_CHI;
+    F_PHI = FLAT_PHI;
+    
+    # save start motor positions arrays
+    # H_ndx is no. of steps in H allowed for scanning
+    H_ndx = 0;
+    for(j=0;j<=num_H_pts;j++) {
+    	 #H_val[j] = (H_st + j*d_H)
+       #H = H_val[j];
+       H = (H_st + j*d_H); 
+       K = 0; 
+       L = L_val;
+       g_sect = 0
+	 g_prefer = 0
+   	 calcA
+
+       ## Do pre checking on the HKL range, possible Q range 
+	 if (calcA){ 
+		eprintf("(H K L = %g %g %g)\n",H,K,L)
+	      print " Error: forbidden H K L"
+            getangles
+            setup_restore
+            exit
+       } 
+ 
+     	 # check both limits of del,mu,keta
+
+	 _bad_lim=0;
+       _chk_lim  del   A[del]
+       _chk_lim  mu    A[mu]
+	 _chk_lim  keta  A[keta]
+       if (_bad_lim) {
+         eprintf("(H K L = %g %g %g)\n",H,K,L)
+         setup_restore
+         exit
+       } 
+      
+       # check upper limit of nu
+       get_user_limit nu 1
+       nu_upper_lim = user_limit
+       if ( A[nu] >= nu_upper_lim) {
+          print " switch to nu --> nu -180"
+          g_sect = 9
+          calcA
+       }    
+       
+       # check lower limit of  nu 
+	 get_user_limit nu -1
+       nu_lower_lim = user_limit 
+       if ( A[nu]  > nu_lower_lim) {
+          print " Now building step no = " H_ndx+1;
+          print "( H K L ) = \n" H,K,L; 
+          del_val[H_ndx]   = A[del]
+          nu_val[H_ndx]    = A[nu]
+	    mu_val[H_ndx]    = A[mu]
+	    keta_val[H_ndx]  = A[keta]
+          H_val[H_ndx]     = H 
+          H_ndx++;        
+   	 }
+
+    }
+    getangles
+    
+    # Important: Before running this macro check PHYSICALLY how OMEGA flips around cuts = -180 to 180
+
+    # mv motors that only move once
+    # mv chi FLAT_CHI
+    # mv phi FLAT_PHI
+       
+    # do the scan 
+    msg_str = "#C KETA_MESH_SCAN START"
+    if (DATAFILE !="") fprintf(DATAFILE,"\n%s\n", msg_str);
+
+    for(j=0;j<H_ndx;j++) {
+       p " H STEP number = " j+1, " H = ", H, " K = ", K, " L = ", L
+        
+       # move to start for line on H  move all at once using scan_move     
+	 A[chi] = FLAT_CHI
+       A[phi] = FLAT_PHI
+       A[del] = del_val[j]
+       A[nu]  = nu_val[j]
+       A[mu]  = mu_val[j]
+       scan_move
+
+       # move to start for line on H
+       # mv del  del_val[j]
+       # mv nu   nu_val[j]
+       # mv mu   mu_val[j]
+
+       # note scan direction reverses line to line ie dont move keta
+       # all the way back for the start of each line
+       # keta_val[] are calc for (H_s,0,L)
+
+       if ( ((j+2) % 2) == 0) { 
+              keta_st = keta_val[j] +  omega_st ;
+              keta_en = keta_val[j] +  omega_st + del_omega;
+       } else if ( ((j+2) % 2) == 1) { 
+              keta_st = keta_val[j] +  omega_st + del_omega ;
+              keta_en = keta_val[j] +  omega_st ;
+       } 
+     
+       # number of omega scan pts, weighted through arc
+       keta_pts = int(num_omega_pts*H_val[j]/H_st)
+  
+       # do the scan
+       # check if HKL written do data file
+
+       ### check to prevent omega flip at CUT_KETA (Q[34]) = -180)
+       xx = (fabs( CUT_KETA ) - fabs( keta_st ) );
+       yy = (fabs( CUT_KETA ) - fabs( keta_en ) );
+       if ( xx <= 0 ) {
+          if ( keta_st < 0 ) { 
+              keta_st = keta_st + fabs(xx) + 1;
+          } else {
+              keta_st = keta_st - fabs(xx) -1;
+          }
+       }
+       if ( yy <= 0 ) {
+          if ( keta_en < 0 ) { 
+              keta_en = keta_en + fabs(yy) + 1;
+          } else {
+              keta_en = keta_en - fabs(yy) -1;
+          }
+       }
+         	   
+	 mv keta keta_st
+       ascan keta keta_st keta_en keta_pts sc_cnt_time 	  
+	  
+   }
+   msg_str = "#C KETA_MESH_SCAN END"
+   if (DATAFILE !="") fprintf(DATAFILE,"\n%s\n", msg_str);
+   setup_restore    
+}'
+
+#################################################
+# To get user_lim from dial_lim with proper sign
+# One can get upper_lim with +1 and lower with -1
+# when sign is -ve: limit reverses from upper to lower and vice versa
+# but calculation USER = DIAL*SIGN + OFFSET remains the same
+# checked with both positive and negative sign in the MEDM screen
+global user_limit
+def get_user_limit '{
+
+    # check input
+    if ($# != 2 ) {
+       #                         		1            2      
+       msg_str = "Usage: get_user_lim  motor_number  limit_direction +1/-1" 
+       # limit_direction +1 is Upper/positive and -1 is lower/negative
+       print msg_str
+       exit
+    } 
+          
+    motor_number = $1
+    limit_dir = $2
+    sign_dir = user(motor_number, 1) - user(motor_number, 0)
+    #offset_val = user(motor_number, get_lim(motor_number,1))- sign_dir*get_lim(motor_number,1)
+    if ( sign_dir > 0){
+        limit_dir = limit_dir;
+    } else { 
+        limit_dir = -limit_dir;
+    }
+    user_limit = user(motor_number, get_lim(motor_number, limit_dir))
+}'
+
+#################################################
+# setup_restore
+def setup_restore '{
+    # enter old values of modes and angles before exit
+    g_mode1 = cur_mode1; g_mode2 = cur_mode2;
+    g_mode3 = cur_mode3; g_mode4 = cur_mode4; 
+    g_mode5 = cur_mode5;
+    g_frz = 0;
+    ALPHA = old_alpha;
+    freeze 
+    g_sect = g_sect_cur
+    g_prefer = g_prefer_cur
+
+}'
+#################################################
+
