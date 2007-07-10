@@ -1,14 +1,13 @@
 # point_scans1.mac
 
 ##########################################################################
-#  Changed the hkl scan file header to write the angles in the *.spc file
+# Changed the hkl scan file header to write the angles in the *.spc file
 # for getting the angles in the SPC file for each NPTS of lscan specific 
-#to Pilatrus detector   SKG April 2007
+# to Pilatus detector   Sanjit Ghose April 2007
 #########################################################################
 
 # This file provides re-implements the following standard SPEC macros 
-# from "standard.mac".  These macros get redefined when doing trajectory
-# scans, therefore must be re-implemented for point scanning.
+# from "scans1.mac".
 #   _ascan
 #   mesh
 #   hklscan
@@ -16,6 +15,11 @@
 #   _hklline
 #   _scanabort
 #   resume
+#
+# This file is changes the definition of these scans to allow FAKE_SCAN
+# for checking that a scan is OK without running it. 
+# It also implements scans differently to prevent following errors with
+# DC motors from accumulating into large errors in axes not being scanned.
 #
 
 ##############################################################
@@ -70,9 +74,11 @@ def _ascan '
 	scan_head
 	PFMT=sprintf("%%s%%8.%df ",UP)
 	VFMT=sprintf("%%s%%9.%df ",UP)
+      _A0 = A
 	def _scan_on \'
 	 for (; NPTS < _n1; NPTS++) {
 		local i
+		for (i=0;i<9;i++) A[i] = _A0[i]
 		for (i=0;i<_nm;i++)
 			A[_m[i]] = _s[i] + NPTS * _d[i]
 
