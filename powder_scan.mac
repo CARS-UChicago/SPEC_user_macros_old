@@ -5,7 +5,7 @@
 #
 #
 #  We need some flags to trap the transition conditions!
-#
+#  This macro uses get_user_limit
 #  note get_user_limit defined in keta_mesh, should be moved to site_standard.mac.... 
 #
 #############
