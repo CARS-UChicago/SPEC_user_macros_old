@@ -16,6 +16,10 @@
 #    October-2002 T2 a few more bug fixes to make sure hkl scans get correct readbacks
 #                 Note mech still has some bugs!
 #    MARCH-2005   MLR & SKG made MAX_TRAJ_ELEMENTS = MAX_TRAJ_POINTS = 2000 (1000) 
+#    April-2005	Add to _ascan when TRAJ_USE_ACTUAL = 0 calcP_fromR so that reported HKL is calc 
+#			HKL from input computed A[i] values                   
+#    Jan-2007     PJE changed def traj_init so that it takes a global for the scaler PV.
+#    Jun-15-2007  MLR commented out calcP_fromR for TRAJ_USE_ACTUAL = 0
 # This file provides replacements for the following macros in the standard SPEC
 # macro file "standard.mac".
 #   _ascan
@@ -25,6 +29,7 @@
 #   _hklline
 #   _scanabort
 #   resume
+#
 #
 # It adds the following new macros:
 #   traj_index
@@ -39,7 +44,6 @@
 #
 #                 SCAN MACROS and SCAN-HELPER MACROS
 #
-
 #########################################################################
 #
 #  _ascan scans the number of motors given by _nm.
@@ -118,6 +122,9 @@ def _ascan '{
             if (k < 0) continue
             _traj_move[k]=1
         }
+        # Calculate the theoretical position of real motors first?
+        for (i=0;i<_nm;i++) A[_m[i]] = _s[i]
+        calcR_fromP
         for (NPTS=0; NPTS < _n1; NPTS++) {
             # Remember current position of all motors
             _A0 = A
@@ -165,7 +172,12 @@ def _ascan '{
         } else {
             # Note the +1 is when the sync pulse occured
             for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS+1) * _d[i]
-        }
+            
+	    # MLR COMMENT THIS OUT ON JUNE 15, 2007.  Do not know who added it, but
+	    # it broke scanning pseudo motors, the motor positions were all the same
+	    # in the SPEC plot
+            #calcP_fromR
+         }
         # add calcHKL to get correct HKL and other angles
         # in the data file, This wont work if TRAJ_USE_ACTUAL = 0
         # and your scanning a "real" motor, ie psuedo motor positions
@@ -708,16 +720,16 @@ def traj_init '{
     local j, _pv
 
     # T2 added below to trn off scaler bf traj scan
-    _pv = TRAJ_IOC_PREFIX "scaler2.CONT"
+    _pv = SCALER_NAME ".CONT"
     epics_put(_pv, 0)
-    #wait(0.3)
-    #_pv = TRAJ_IOC_PREFIX "scaler2.CNT"
-    #epics_put(_pv, 0)
-    #
 
     for(j=0;j<MAX_TRAJ_MOTORS;j++) _traj_move[j]=0
     _pv = TRAJ_MCS_PREFIX "ChannelAdvance"
     epics_put(_pv, "External")
+
+      
+
+
 }'
 
 
@@ -752,14 +764,47 @@ def traj_build '{
         eprintf("Trajectory build failed, error message = %s", mess)
         exit
     }
+
+   #Setup the Pilatus
+   if (EPICS_COUNT == 4){
+     # Write to database fields
+     # We use the "wait" argument to epics_put so it uses ca_put_callback,
+     # and we are sure things are accepted before we start counting
+     # Need to convert path from string to byte array
+     array _temp[256]
+     _temp = PILATUS_IMAGE_DIR
+     # Do not overwrite path for now
+     #epics_put(PILATUS_IMGPATH_PV,_temp, 1)
+     img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
+     epics_put(PILATUS_FNAME_PV,img_fname,1)
+     epics_put(PILATUS_FILENUMBER_PV,0,1)
+     _fileformat = "%s%s_%.3d.tif"
+     epics_put(PILATUS_FILEFORMAT_PV,_fileformat,1)
+     epics_put(PILATUS_NFRAME_PV, $2, 1)
+     epics_put(PILATUS_ACQMODE_PV,1,1)  # External enable
+
+     # hit the triggers
+     epics_put(PILATUS_ACQ_PV,1)
+   }
 }'
 
 ##############################################################
 # traj_exec executes a trajectory.
 def traj_exec '{
     local _pv, mess
+
+    # check the beam
+    check_beam
+
+    # if using bench shutter open it before execution
+    if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
     _pv = TRAJ_NAME "Execute"; epics_put(_pv, 1)
     while (epics_get(_pv) == "Busy") sleep(0.1)
+
+    # if using bench shutter close it after execution
+    if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
     _pv = TRAJ_NAME "ExecStatus";
     if (epics_get(_pv) != "Success") {
         _pv = TRAJ_NAME "ExecMessage"
@@ -767,6 +812,7 @@ def traj_exec '{
         eprintf("Trajectory execution failed, error message = %s", mess)
         exit
     }
+
 }'
 
 ##############################################################
@@ -784,6 +830,12 @@ def traj_read_counts '{
     _pv = TRAJ_MCS_PREFIX "Acquiring"
     while (epics_get(_pv) != "Done") sleep(0.1)
 
+    # Wait for Pilatus to be done acquiring. 
+    # Use this for img_off case if (EPICS_COUNT == 4) 
+
+        while (epics_get(PILATUS_ACQ_PV) != "Done") sleep(0.1)
+    
+
     # add this to wait for readback since we need to check the number of points
     #_pv = TRAJ_NAME "Readback"
     #while (epics_get(_pv) == "Busy") sleep(0.1)
@@ -791,10 +843,24 @@ def traj_read_counts '{
     _ndets=$1; 
     _npts=$2
 
+
+    # PJE 6/5/07
+    # We can now remove this check and fix since we now have as a 9th
+    # counter "iroi".  
     # T2 added check
-    if (_ndets > MAX_TRAJ_MCS){
-         _ndets = MAX_TRAJ_MCS
-    }
+    # if (_ndets > MAX_TRAJ_MCS){
+    #    _ndets = MAX_TRAJ_MCS
+    # }
+
+    # PJE 6/5/07. This is a little bit of a kluge since TRAJ_MCS_NAME[0-7]
+    # are set to TRAJ_MCS_PREFIX mca0-7 where in spec counters 5-7 are
+    # MCA ROIs used when the xrf_on is used in spec.  The xrf detector
+    # is not used in traj mode so the writing the MCS channels to the spec
+    # S array is not a problem.  Note that we now are reading the Pilatus
+    # image data roi as the ninth counter (S(8)).
+
+
+
     for (i=0; i<_ndets; i++) {
         _traj_counts[i][0:_npts-1] = epics_get(TRAJ_MCS_NAME[i])
     }
@@ -857,7 +923,7 @@ global MAX_TRAJ_ELEMENTS
 global TRAJ_USE_ACTUAL
 global TRAJ_INDEX
 global TRAJ_CLOCK_SCALE
-TRAJ_IOC_PREFIX     = "13IDC:"
+#TRAJ_IOC_PREFIX  is defined in site_startup  
 TRAJ_NAME           = TRAJ_IOC_PREFIX "traj1"
 TRAJ_MCS_PREFIX     = TRAJ_IOC_PREFIX "str:"
 TRAJ_MOTOR_NAME[0]  = TRAJ_NAME "M1"
@@ -876,13 +942,14 @@ TRAJ_MCS_NAME[4]    = TRAJ_MCS_PREFIX "mca5"
 TRAJ_MCS_NAME[5]    = TRAJ_MCS_PREFIX "mca6"
 TRAJ_MCS_NAME[6]    = TRAJ_MCS_PREFIX "mca7"
 TRAJ_MCS_NAME[7]    = TRAJ_MCS_PREFIX "mca8"
+TRAJ_MCS_NAME[8]    = PILATUS_PREFIX "ROI1WFNetCounts"
 MAX_TRAJ_MOTORS     = 8
 MAX_TRAJ_INDEX      = 9
 MAX_TRAJ_MCS        = 8
 MAX_TRAJ_POINTS     = 2000
 MIN_TRAJ_ELEMENTS   = 4
 MAX_TRAJ_ELEMENTS   = 2000
-TRAJ_CLOCK_SCALE    = counter_par(SEC,"scale")
+TRAJ_CLOCK_SCALE    = counter_par(sec,"scale")
 if (unset("TRAJ_USE_ACTUAL")) TRAJ_USE_ACTUAL = 1
 # This table gives the TRAJ motor corresponding to each SPEC motor
 #TRAJ_INDEX[0]       = 4  # Two theta
@@ -926,5 +993,12 @@ array _traj_motor[MAX_TRAJ_INDEX]
 array _traj_move[MAX_TRAJ_MOTORS]
 array _traj_pos[MAX_TRAJ_MOTORS][MAX_TRAJ_ELEMENTS]
 array _traj_time[MAX_TRAJ_ELEMENTS]
-array _traj_counts[MAX_TRAJ_MCS][MAX_TRAJ_POINTS]
+
+# PJE 4-11-07.  The array for the _tranj_counters needs to be
+# dimentioned acording to the spec config file number of counters
+# but the MAX_TRAJ_MCS can not excced the number of MCS channels
+# that are configured in EPICS
+#array _traj_counts[MAX_TRAJ_MCS][MAX_TRAJ_POINTS]
+array _traj_counts[COUNTERS][MAX_TRAJ_POINTS]
+
 array _traj_actual[MAX_TRAJ_MOTORS][MAX_TRAJ_POINTS]
