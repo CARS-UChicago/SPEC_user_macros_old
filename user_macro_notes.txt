@@ -10,11 +10,36 @@
 - Note that these macros are replaced when spec is re-installed
   therefore dont edit these files or the changes will be lost
 
+--> one exception, for multiple configurations with different monochrometers need
+   to change the def of mono_settings, ie by default spec uses
+   /usr/local/spec.d/mono_settings
+   we want 
+   /usr/local/spec.d/psic_idc/mono_settings   etc...
+
+  Therefore when re-install spec make sure this is the mono_settings def
+
+# If the same platform supports different configurations with
+# separate monochromators, you want to put the monochromator
+# parameters in a file unique to the configuration.  The SPEC
+# variable contains the name of the configuration.  This first
+# instance of mono_settings() is appropriate in such a situation.
+def mono_settings() '{
+        return(sprintf("%s/%s/mono_settings", SPECD, SPEC))
+}'
+
+# If the same platform supports multiple configurations that
+# use the same monochromator, you can put the parameters in a file
+# common to all configurations.
+#def mono_settings() '{
+#	return(sprintf("%s/mono_settings", SPECD))
+#}'
+
+
 - The below macro files are not replaced during a new installation 
   and can be used for defining/replacing macros
 
       /usr/lib/spec.d/site_f.mac        (read only when starting fresh)
-      /usr/lib/spec.d/site.mac          (read each time each user starts)
+      /usr/lib/spec.d/site.mac          (read each time each user starts)  
       /usr/lib/spec.d/spec/conf.mac     (spec= kappa, psic, sixc, spec, etc.)
                                         (this is read every time spec starts)
       /usr/lib/spec.d/spec/spec.mac     (spec= kappa, psic, sixc, spec, etc.)
