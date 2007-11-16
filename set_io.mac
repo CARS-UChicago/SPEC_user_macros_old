@@ -1,0 +1,125 @@
+######
+# set ion chamber gains
+# untested!!!!
+##
+
+array GAIN_STEPS[9]
+GAIN_STEPS[0] = 1
+GAIN_STEPS[1] = 2
+GAIN_STEPS[2] = 5
+GAIN_STEPS[3] = 10
+GAIN_STEPS[4] = 20
+GAIN_STEPS[5] = 50
+GAIN_STEPS[6] = 100
+GAIN_STEPS[7] = 200
+GAIN_STEPS[8] = 500
+
+array GAIN_UNITS[4]
+GAIN_UNITS[0] = 'pA/V'
+GAIN_UNITS[1] = 'nA/V'
+GAIN_UNITS[2] = 'uA/V'
+GAIN_UNITS[3] = 'mA/V'
+
+
+
+def set_io {
+    # check input
+    if ($# != 2 ) {
+      msg_str = "Usage: ionchamber_gain  gain unit\n"
+      msg_str = msg_str + "   gain is one of [1,2,5,10,20,50,100,200,500]
+      msg_str = msg_str + "   unit is one of ['pA/V','nA/V','uA/V','mA/V']
+      print msg_str
+      exit
+    } 
+  
+    ionchamber_gain '13IDC:B1' $1 $2
+}
+
+
+def set_i1 {
+    # check input
+    if ($# != 2 ) {
+      msg_str = "Usage: ionchamber_gain  gain unit\n"
+      msg_str = msg_str + "   gain is one of [1,2,5,10,20,50,100,200,500]
+      msg_str = msg_str + "   unit is one of ['pA/V','nA/V','uA/V','mA/V']
+      print msg_str
+      exit
+    } 
+  
+    ionchamber_gain '13IDC:B4' $1 $2
+}
+
+
+def ionchamber_gain {
+
+    # check input
+    if ($# != 3 ) {
+      msg_str = "Usage: ionchamber_gain  pv_pfx gain unit\n"
+      msg_str = msg_str + "   gain is one of [1,2,5,10,20,50,100,200,500]
+      msg_str = msg_str + "   unit is one of ['pA/V','nA/V','uA/V','mA/V']
+      print msg_str
+      exit
+    } 
+    # ionchamber_gain, '13IDC:B1' 2 'nA/V'
+
+    amp_pv   = $1
+    sval     = $2
+    sval_str = sprintf("%d",$2)
+    sval_idx = get_amp_gain_idx($2)
+    uval_str = $3
+    uval_idx = get_amp_unit_idx($3)
+
+    sense_num_pv  = amp_pv + 'sense_num.VAL'
+    sense_unit_pv = amp_pv + 'sense_unit.VAL'
+    offset_num_pv = amp_pv + 'offset_num.VAL'
+    offset_unit_pv = amp_pv + 'offset_unit.VAL'
+    offset_u_put_pv = amp_pv + 'off_u_put.VAL'
+
+    epics_put(sense_num_pv, sval_str)
+    epics_put(sense_unit_pv, uval_str)
+
+    # algo from Matt to try and set offset
+    # at approriate value
+    if (sval_idx >= 3 ) {
+       epics_put(offset_unit_pv, uval)
+       temp = sprintf("%d",sval-30) 
+       epics_put(offset_num_pv,  temp)
+    } else {
+       temp = uval_idx - 1 
+       epics_put(offset_unit_pv, uval-1)
+       epics_put(offset_num_pv, sval+60)
+    }
+    x = caput(offset_u_put_pv,   110)
+
+}
+
+
+####################################################
+# pass in a amp gain setting for the stanfords and
+# return the corresponding integer index
+# if its not in the list rets 0 == 1, ie careful
+def get_amp_gain_idx(gain) '{
+
+    for (j=0; j<9;j++){
+       if (gain == GAIN_STEPS[j]) {
+           return(j);
+       }
+    }
+    return(0)
+}'
+
+####################################################
+# pass in a amp unit setting for the stanfords and
+# return the corresponding integer index
+# if its not in the list rets 3 == 'nA/V', ie careful
+def get_amp_unit_idx(unit) '{
+    for (j=0; j<4;j++){
+       if (unit == GAIN_UNITS[j]) {
+           return(j);
+       }
+    }
+    return(2)
+}'
+
+
+#######################################################
