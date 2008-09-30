@@ -1,0 +1,20 @@
+def _epics_put '{
+
+    # check input
+    if ($# != 2 ) {			1	2
+      msg_str = "Usage: _epics_put PVname Value"
+      print msg_str
+      exit
+    } 
+    prefix = $1;    
+
+    # check for pvname prefix spliting with dot
+    
+    dstr = split(prefix,splt_dstr,".")
+    if ("waveform" == epics_get(splt_dstr[0]".RTYP")  {
+         nelem = epics_get(splt_dstr[0]".NELM")
+         long array value[nelem]
+    } 
+    value = $2
+    epics_put(pvname, value);
+}'
