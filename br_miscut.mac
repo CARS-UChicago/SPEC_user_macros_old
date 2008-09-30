@@ -1,0 +1,81 @@
+# br_miscut.mac
+# send sample angles along the surface normal direction using azimuth reference vector
+# The azimuth ref vector is a recip lattice vector, defined as (dH,dK,1), where
+# dH = (Hmc - H_B)/(Lmc - L_B)
+# dK = (Kmc - K_B)/(Lmc - L_B)
+# with (Hmc,Kmc,Lmc) the position of a point on the rod 
+# from the Bragg point (H_B,K_B,L_B)
+# 
+# Given these slopes we can calc the motor positions for an arbitrary 
+# point along a miss-cut rod from
+#
+# Hmc = H + (L-L_B)*dH
+# Kmc = K + (L-L_B)*dK
+# Lmc = L
+#
+# br H K L L_B [dH dK]
+#
+# where H and K are the rod indicies and L_B is 
+# for the desired Bragg peak 
+#
+#####################
+
+def calc_mc '{
+      # use: 
+      if ($# < 4){
+          print " calc_mc H K L L_B [dH dK] "
+      }
+	local azH, azK, azL, dHH, dKK, Hmc, Kmc, L, L_B
+	if ($# == 6) {
+		L = $3
+		L_B = $4
+		dHH = $5
+		dKK = $6
+		Hmc = $1+(L-L_B)*dHH
+		Kmc = $2+(L-L_B)*dKK 
+		cal Hmc Kmc L 
+      }
+	if ($# == 4) { 
+		azH = G[3]
+		azK = G[4]
+		azL = G[5]
+		dHH = azH/azL
+		dKK = azK/azL
+		L = $3
+		L_B = $4
+		Hmc = $1+(L-L_B)*dHH
+		Kmc = $2+(L-L_B)*dKK 
+		cal Hmc Kmc L 
+      }
+}' 
+
+
+def br_mc '{
+      # use: 
+      if ($# < 4){
+          print " br_mc H K L L_B [dH dK] "
+      }
+	local azH, azK, azL, dHH, dKK, Hmc, Kmc, L, L_B
+	if ($# == 6) {
+		L = $3
+		L_B = $4
+		dHH = $5
+		dKK = $6
+		Hmc = $1+(L-L_B)*dHH
+		Kmc = $2+(L-L_B)*dKK 
+		ubr Hmc Kmc L 
+      }
+	if ($# == 4) { 
+		azH = G[3]
+		azK = G[4]
+		azL = G[5]
+		dHH = azH/azL
+		dKK = azK/azL
+		L = $3
+		L_B = $4
+		Hmc = $1+(L-L_B)*dHH
+		Kmc = $2+(L-L_B)*dKK 
+		ubr Hmc Kmc L 
+      }
+}' 
+
