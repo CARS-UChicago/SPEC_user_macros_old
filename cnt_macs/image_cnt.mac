@@ -25,7 +25,23 @@ global    PILATUS_NFRAME_PV
 global    PILATUS_EXPPRD_PV
 global    PILATUS_NEXPFRM_PV
 global    PILATUS_ACQ_PV
+global    PILATUS_ARMED_PV
+global    PILATUS_ABORT_PV
 global    PILATUS_ACQMODE_PV
+global    PILATUS_READOUT_TIME
+
+global    PILATUS_ROI1XMin_PV
+global    PILATUS_ROI1XMax_PV
+global    PILATUS_ROI1YMin_PV
+global    PILATUS_ROI1YMax_PV
+global    PILATUS_ROI1BgdWidth_PV
+
+global    PILATUS_Hp
+global    PILATUS_Hw
+global    PILATUS_Vp
+global    PILATUS_Vw
+global    PILATUS_MOUNT
+global    PILATUS_SPEC_MOUNT
 
 ###############################################################
 def _setup_img '{
@@ -33,7 +49,22 @@ def _setup_img '{
 		
      # PILATUS_PREFIX should be detector aquisition pv (GSE-PILATUS1:)
      if ( PILATUS_PREFIX == "") PILATUS_PREFIX = "GSE-PILATUS1:"
-     PILATUS_PREFIX = getval("Enter PILATUS pv prefix",PILATUS_PREFIX)
+     PILATUS_PREFIX = getsval("Enter PILATUS pv prefix",PILATUS_PREFIX)
+     
+     if (PILATUS_MOUNT == "") PILATUS_MOUNT = "cars5/Data"
+     PILATUS_MOUNT = getsval("Enter mount point relative to camserver home directory",PILATUS_MOUNT)
+     if (PILATUS_SPEC_MOUNT == "") PILATUS_SPEC_MOUNT = "cars5/Data"
+     PILATUS_SPEC_MOUNT = getsval("Enter mount point relative to spec home directory",PILATUS_SPEC_MOUNT) 
+
+
+     if ( PILATUS_Hp == "") PILATUS_Hp = 234
+     if ( PILATUS_Hp == "") PILATUS_Hw = 2000
+     if ( PILATUS_Hp == "") PILATUS_Vp = 103
+     if ( PILATUS_Hp == "") PILATUS_Vw = 2000
+     PILATUS_Hp = getval("Enter PILATUS center horz pixel",PILATUS_Hp)
+     PILATUS_Hw = getval("Enter PILATUS horz roi width in microns",PILATUS_Hw)
+     PILATUS_Vp = getval("Enter PILATUS center vert pixel",PILATUS_Vp)
+     PILATUS_Vw = getval("Enter PILATUS vert roi width in microns",PILATUS_Vw)	
 
      # rois pvs
      PILATUS_ROI_PV    = PILATUS_PREFIX "ROI1NetCounts"
@@ -46,18 +77,78 @@ def _setup_img '{
      PILATUS_EXPPRD_PV  = PILATUS_PREFIX "ExposurePeriod"
      PILATUS_NEXPFRM_PV = PILATUS_PREFIX "NExposures"
      PILATUS_ACQ_PV     = PILATUS_PREFIX "Acquire"
+     PILATUS_ARMED_PV   = PILATUS_PREFIX "Armed"
+     PILATUS_ABORT_PV   = PILATUS_PREFIX "Abort"
      PILATUS_ACQMODE_PV = PILATUS_PREFIX "AcquireMode"
+     PILATUS_THRESHOLD_PV = PILATUS_PREFIX "ThresholdEnergy"
+     PILATUS_ROI1XMin_PV = PILATUS_PREFIX "ROI1XMin"
+     PILATUS_ROI1XMax_PV = PILATUS_PREFIX "ROI1XMax"
+     PILATUS_ROI1YMin_PV = PILATUS_PREFIX "ROI1YMin"
+     PILATUS_ROI1YMax_PV = PILATUS_PREFIX "ROI1YMax"
+     PILATUS_ROI1BgdWidth_PV = PILATUS_PREFIX "ROI1BgdWidth"
 
-     # Build directory name.  Here we hard wire in some stuff
-     # IMAGE_DIR = ~/gpd/year/XXX/YYY/.../images
-     # must be less than 40 chars!
-     CURRENT_DIR = CWD
-     #dstr = split(CURRENT_DIR,splt_dstr,"/gpd_user/")
-     #PILATUS_IMAGE_DIR= sprintf("~/gpd/%s/images",splt_dstr[1])
-     dstr = split(CURRENT_DIR,splt_dstr,"/cars5/") 
-     PILATUS_IMAGE_DIR= sprintf("~/cars5/%s/images",splt_dstr[1]) 
+     # Set Monitors. We tried this but it is not working. Results in a ca error PJE 1/22/08
+     # epics_par(PILATUS_ARMED_PV,"monitor_set")
+     # epics_par(PILATUS_ACQ_PV,"monitor_set")
+
+     # Read the value of the threshold energy and test to see
+     # if the pilatus IOC is running
+     thresholdEnergy = epics_get(PILATUS_PREFIX "ThresholdEnergy")
+     if(thresholdEnergy == ""){
+        # Could not connect to the pilatus IOC cleanup and exit
+        print PILATUS_PREFIX " IOC is not comunicating or bad PV"
+        img_off
+        exit
+     } 
+     else {
+       print "The Pilatus threshold Energy is set to: " thresholdEnergy
+     }
+
+     # Build directory name. 
+     # Here we build the Pilatus file director.  It is broken up into a 
+     # Pilatus mount point so that it is easy to change the disk that 
+     # the data is saving to while preserving the directory structure 
+     # of the spec file location on that disk.  For example we can us 
+     # the local disk on the computer controlling the Pilatus and build 
+     # a data tree  that matches the one on cars5.
+     
+     dstr = split(CWD,splt_dstr,PILATUS_SPEC_MOUNT)
+     PILATUS_IMAGE_DIR =  sprintf("~/%s%s",PILATUS_MOUNT, splt_dstr[1])
+     PILATUS_IMAGE_DIR = sprintf("%s/images",PILATUS_IMAGE_DIR)
      print "Pilatus Image directory = ", PILATUS_IMAGE_DIR
-      ct
+     array _temp[256]
+     _temp = PILATUS_IMAGE_DIR
+     # We set the path above in _setup_img.  That way users can change it if they want.
+     epics_put(PILATUS_IMGPATH_PV,_temp, 1)
+
+     # Time needed to read out the Pilatus
+     PILATUS_READOUT_TIME = 0.004
+
+
+     #Calc iroi based on pixel center and width in mm.
+     _hw = round(PILATUS_Hw/(2. * 172.))
+     _vw = round(PILATUS_Vw/(2. * 172.))
+     _xmin = PILATUS_Hp - _hw
+     _xmax = PILATUS_Hp + _hw
+     _ymin = PILATUS_Vp - _vw
+     _ymax = PILATUS_Vp + _vw
+
+     print "Hw [um] = " (_xmax - _xmin) * 172
+     print "Vw [um] = " (_ymax - _ymin) * 172
+
+     print "xmin = " _xmin
+     print "xmax = " _xmax
+     print "ymin = " _ymin
+     print "ymax = " _ymax
+
+     epics_put(PILATUS_ROI1XMin_PV,_xmin, 1)
+     epics_put(PILATUS_ROI1XMax_PV,_xmax, 1)
+     epics_put(PILATUS_ROI1YMin_PV,_ymin, 1)
+     epics_put(PILATUS_ROI1YMax_PV,_ymax, 1)
+     epics_put(PILATUS_ROI1BgdWidth_PV,0, 1)
+     
+     ct
+
 }'
 
 #def set_img_roi '{
@@ -71,7 +162,7 @@ def _setup_img '{
 def _img_on '{ 
 
    if (PILATUS_PREFIX == ""){
-       eprint "PILATUS_PREFIX unset, run setup_pilatus first!"
+       eprint "PILATUS_PREFIX unset, run setup_img first!"
        exit
    }
 
@@ -118,10 +209,22 @@ def epics_pilatus_count '{
 
      # make file name field newfile_SCAN_N
      if (PILATUS_WRITE_FILES){  
+         dstr = split(DATAFILE,splt_dstr,".")
+         # Warning the path below cab over flowed the pilatus path string buffer if string longer than 156
+         # PJE is including it now as a test.  Need to look into making string buffer larger
+         # PJE 2/22/08
+         _img_path = sprintf("%s/%s/S%.3d",PILATUS_IMAGE_DIR,splt_dstr[0],SCAN_N)
+         # p _img_path
+         array _temp[256]
+         _temp = _img_path
+         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
          img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
          _fileformat = "%s%s_%.3d.tif"
-         #print img_fname
+         # print img_fname
      } else {
+         array _temp[256]
+         _temp = PILATUS_IMAGE_DIR 
+         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
          img_fname = "000test"
          _fileformat = "%s%s.tif"
          #print img_fname
@@ -129,20 +232,19 @@ def epics_pilatus_count '{
 
      # write to data base fields
      # Need to convert path from string to byte array
-     array _temp[256]
-     _temp = PILATUS_IMAGE_DIR
-     epics_put(PILATUS_IMGPATH_PV,_temp)
-     epics_put(PILATUS_FNAME_PV,img_fname)
-     epics_put(PILATUS_FILENUMBER_PV,NPTS)
-     epics_put(PILATUS_FILEFORMAT_PV,_fileformat)
-     epics_put(sc_prtm_pv,cnt_time_val)
-     epics_put(PILATUS_EXPSRTM_PV,cnt_time_val)
-     epics_put(PILATUS_ACQMODE_PV,0)  # Internal trigger 
-     epics_put(PILATUS_NFRAME_PV, 1)
-     epics_put(PILATUS_NEXPFRM_PV, 1)
-     #We need to sleep here to make sure the setup commands
-     # are recived by camserver before hitting the aquire button
-     sleep(.09)
+     # Note: we use the "wait" parameter in epics_put here (new to spec5.7.02) so that
+     # it uses ca_put_callback, to know that all PVs have been processed
+     # before we start counting.  Use 1 second timeout, will actually be
+     # much faster than this unless something is wrong.
+     # We set the path above in _setup_img.  That way users can change it if they want.
+     epics_put(PILATUS_FNAME_PV,img_fname, 1)
+     epics_put(PILATUS_FILENUMBER_PV,NPTS, 1)
+     epics_put(PILATUS_FILEFORMAT_PV,_fileformat, 1)
+     epics_put(sc_prtm_pv,cnt_time_val, 1)
+     epics_put(PILATUS_EXPSRTM_PV,cnt_time_val, 1)
+     epics_put(PILATUS_NFRAME_PV, 1, 1)
+     epics_put(PILATUS_NEXPFRM_PV, 1, 1)
+     epics_put(PILATUS_ACQMODE_PV,0, 1)  # Internal trigger 
 
      # user pre count stuff
      user_precount
@@ -179,5 +281,40 @@ def epics_pilatus_count '{
      # note get_counts also calls user_getcounts
      # thats where the rois get read.
      get_counts  
+}'
+
+###############################################################
+def img_slit '{
+     
+    if ($# != 2) {
+        eprint "\
+        Usage:  img_slit  Hw Vw"
+        exit
+    }		
+
+     PILATUS_Hw = $1
+     PILATUS_Vw = $2
+
+     #Calc iroi based on pixel center and width in mm.
+     _hw = round(PILATUS_Hw/(2. * 172.))
+     _vw = round(PILATUS_Vw/(2. * 172.))
+     _xmin = PILATUS_Hp - _hw
+     _xmax = PILATUS_Hp + _hw
+     _ymin = PILATUS_Vp - _vw
+     _ymax = PILATUS_Vp + _vw
+
+     print "Hw [um] = " (_xmax - _xmin) * 172
+     print "Vw [um] = " (_ymax - _ymin) * 172
+
+     print "xmin = " _xmin
+     print "xmax = " _xmax
+     print "ymin = " _ymin
+     print "ymax = " _ymax
+
+     epics_put(PILATUS_ROI1XMin_PV,_xmin, 1)
+     epics_put(PILATUS_ROI1XMax_PV,_xmax, 1)
+     epics_put(PILATUS_ROI1YMin_PV,_ymin, 1)
+     epics_put(PILATUS_ROI1YMax_PV,_ymax, 1)
+     epics_put(PILATUS_ROI1BgdWidth_PV,0, 1)
 }'
 
