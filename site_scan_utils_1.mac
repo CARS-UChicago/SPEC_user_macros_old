@@ -58,13 +58,67 @@ def get_frac(x) '{
 ############################################################################
 
 
+
+##########################################################################################
+##########################################################################################
+#  Shutter utilities                                                                     #
+##########################################################################################
+##########################################################################################
+# set = 1 = in
+# set = 0 = out
+# global pv's defined in site_startup.mac
+##########################################################################################
+global USE_BENCH_SHUTTER
+if( unset("USE_BENCH_SHUTTER") )  USE_BENCH_SHUTTER = FALSE
+global BENCH_SHUTTER_DELAY
+if( unset("BENCH_SHUTTER_DELAY") ) BENCH_SHUTTER_DELAY = 0.01
+
+def bench_shutter(set) '{ 
+    if ( set == 1){
+          epics_put(BENCH_SHUTTER_PV, 1)
+	    epics_put(BENCH_SHUTTER_ATTEN_PV, 1)
+    } else {
+         epics_put(BENCH_SHUTTER_PV, 0)
+         epics_put(BENCH_SHUTTER_ATTEN_PV, 0)
+         sleep(BENCH_SHUTTER_DELAY)
+    }
+ 
+}'
+
+def bs_true '{
+  if (length(BENCH_SHUTTER_PV) == 0){
+     print "No Bench Shutter pv defined"
+  } else {
+     print "Use bench shutter to protect sample"
+     USE_BENCH_SHUTTER = TRUE
+     bench_shutter(1)
+  }
+}'
+
+def bs_false '{
+  print "Not auto protecting sample with shutter"
+  USE_BENCH_SHUTTER = FALSE
+}'
+
+def bso '{
+  bench_shutter(0)
+  print "Bench shutter open"
+}'
+
+def bsc '{
+  bench_shutter(1)
+  print "Bench shutter closed"
+}'
+
+##########################################################################################
+
+
 ##########################################################################################
 ##########################################################################################
 #  Attenuators                                                                           #
 ##########################################################################################
 ##########################################################################################
-# ToDO
-#
+
 ##########################################################################################
 # globals for attenuator macros macro
 ##########################################################################################
@@ -73,30 +127,9 @@ global SAT_CNTR_IDX
 if( unset("SAT_CNTR_IDX") )  SAT_CNTR_IDX = 3;   # bi
 
 global ATTEN_SET
-if( unset("ATTEN_SET") )    ATTEN_SET = FALSE; 
+if( unset("ATTEN_SET") )  ATTEN_SET = FALSE; 
 
-#PV Values for unidig (control and status bit)
-global ATT_STATUS_BIT_1
-global ATT_STATUS_BIT_2  
-global ATT_STATUS_BIT_3  
-global ATT_STATUS_BIT_4  
-
-global ATT_CONTROL_BIT_1 
-global ATT_CONTROL_BIT_2 
-global ATT_CONTROL_BIT_3 
-global ATT_CONTROL_BIT_4 
-
-
-ATT_STATUS_BIT_1   = "13IDC:Unidig1Bi16.VAL"
-ATT_STATUS_BIT_2   = "13IDC:Unidig1Bi18.VAL"
-ATT_STATUS_BIT_3   = "13IDC:Unidig1Bi20.VAL"
-ATT_STATUS_BIT_4   = "13IDC:Unidig1Bi22.VAL"
-
-ATT_CONTROL_BIT_1  = "13IDC:Unidig1Bo17.VAL"
-ATT_CONTROL_BIT_2  = "13IDC:Unidig1Bo19.VAL"
-ATT_CONTROL_BIT_3  = "13IDC:Unidig1Bo21.VAL"
-ATT_CONTROL_BIT_4  = "13IDC:Unidig1Bo23.VAL"
-
+#PV Values for unidig (control and status bit) defined in site_startup
 
 # does this work??
 # I think numeric arrays (ie defined as array) get blown away when 
@@ -105,9 +138,7 @@ ATT_CONTROL_BIT_4  = "13IDC:Unidig1Bo23.VAL"
 if(ATTEN_SET == FALSE){  
    array  atten_idx[16][4];
    array  filter_idx[16][2];
-   array  ATTEN[4]
-          ATTEN = 0;
-#   array ATTEN_FACS[4]
+   array  ATTEN[4]; ATTEN = 0;
 }
 
 global SAT_CNT_RATE
@@ -118,7 +149,6 @@ global ATTEN_FACS
 
 ##########################################################################################
 def atten_setup '{
-
 
       #assign attenuation factors for the four filters	
 	ATTEN_FACS["0"] = getval("enter atten factor for filter 1",ATTEN_FACS["0"])
@@ -150,8 +180,6 @@ def atten_setup_calc'{
 	atten_idx [3,6,7,8,12:][1] = 1
 	atten_idx [2,5,7,8,10,11,14,15][2] = 1
 	atten_idx [1,5,6,8,9,11,13,15][3] = 1
-
-
 
       #Generate and store all of the attenuation factors in an array
 	local i, j
@@ -226,7 +254,7 @@ def CHECK_SAT(do_set) '{
    # but were saying that if ATTEN[i] = 0 the atten is out
    ATTEN[] = 0;
 
-   #Determine current attwnuator positions
+   #Determine current attenuator positions
    if( epics_get(ATT_STATUS_BIT_1) == "Low") ATTEN[0]=1;
    if( epics_get(ATT_STATUS_BIT_2) == "Low") ATTEN[1]=1;
    if( epics_get(ATT_STATUS_BIT_3) == "Low") ATTEN[2]=1;
@@ -293,15 +321,13 @@ return(sat);
 ##########################################################################################
 ## add attenuators for detector arm
 def add_atten(set1, set2, set3, set4) '{   
+ array test[4]
+ test = 1
+ num_try = 0
+ max_try = 10
+ ok = 1
 
-array test[4]
-test = 1
-
-num_try = 0
-max_try = 10
-ok = 1
-
-#put the attenuators in the desired position and repeat command in unidig failed
+ #put the attenuators in the desired position and repeat command in unidig failed
  while( (ok == 1) && (num_try < max_try) ){ 
      #####
      if ( set1 == 1){
