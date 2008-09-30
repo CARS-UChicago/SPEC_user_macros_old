@@ -7,6 +7,114 @@
 ##
 ############################################################################
 ############################################################################
+###
+### config dependant globals
+############################################################################
+
+## Here are the IDC globals
+if (SPEC == "psic_idc"){
+   print '******  THIS IS psic_idc ***********'
+   ### Bench Shutter
+   global BENCH_SHUTTER_PV
+       BENCH_SHUTTER_PV = '13IDC:Unidig1Bo0'
+   global BENCH_SHUTTER_ATTEN_PV
+       BENCH_SHUTTER_ATTEN_PV = '13IDC:Unidig1Bo1'
+   global USE_BENCH_SHUTTER
+   USE_BENCH_SHUTTER = TRUE
+
+   ### Attenuators
+   global ATT_STATUS_BIT_1
+       ATT_STATUS_BIT_1   = "13IDC:Unidig1Bi16.VAL"
+   global ATT_STATUS_BIT_2
+       ATT_STATUS_BIT_2   = "13IDC:Unidig1Bi18.VAL"
+   global  ATT_STATUS_BIT_3      
+       ATT_STATUS_BIT_3   = "13IDC:Unidig1Bi20.VAL"
+   global ATT_STATUS_BIT_4
+       ATT_STATUS_BIT_4   = "13IDC:Unidig1Bi22.VAL"
+   global ATT_CONTROL_BIT_1
+       ATT_CONTROL_BIT_1  = "13IDC:Unidig1Bo17.VAL"
+   global ATT_CONTROL_BIT_2
+       ATT_CONTROL_BIT_2  = "13IDC:Unidig1Bo19.VAL"
+   global ATT_CONTROL_BIT_3
+       ATT_CONTROL_BIT_3  = "13IDC:Unidig1Bo21.VAL"
+   global ATT_CONTROL_BIT_4
+       ATT_CONTROL_BIT_4  = "13IDC:Unidig1Bo23.VAL"
+
+   ### Mono
+   global ENERGY_MOVING
+       ENERGY_MOVING      = "13IDA:E:Moving"
+   global MONO_FB1_ON
+       MONO_FB1_ON        = "13IDA:fast_pitch_pid.FBON"
+   global MONO_FB1_LOCKED
+       MONO_FB1_LOCKED    = "13IDA:fast_pitch_pidLocked"
+
+   #global MONO_FB2_ON
+   #    MONO_FB2_ON        = "13IDA:fast_roll_pid.FBON"
+   #global MONO_FB2_LOCKED
+   #    MONO_FB2_LOCKED    = "13IDA:fast_roll_pidLocked"
+
+   ### Traj
+   global TRAJ_IOC_PREFIX
+       TRAJ_IOC_PREFIX     = "13IDC:"
+
+   ### Scalers Temp until traj auto count bug is fixed
+   global SCALER_NAME     
+       SCALER_NAME        = "13IDC:scaler2"
+
+## Here are the BMC globals
+} else if (SPEC == "psic_bmc") {
+    print '*********** THIS IS psic_bmc ***********'
+
+   ### Bench Shutter
+   global BENCH_SHUTTER_PV
+       BENCH_SHUTTER_PV = ""
+   global BENCH_SHUTTER_ATTEN_PV
+       BENCH_SHUTTER_ATTEN_PV = ""
+   global USE_BENCH_SHUTTER
+   USE_BENCH_SHUTTER = FALSE
+
+   ### Attenuators
+   global ATT_STATUS_BIT_1
+       ATT_STATUS_BIT_1   = "13BMC:Unidig1Bi0.VAL"
+   global ATT_STATUS_BIT_2
+       ATT_STATUS_BIT_2   = "13BMC:Unidig1Bi1.VAL"
+   global  ATT_STATUS_BIT_3      
+       ATT_STATUS_BIT_3   = "13BMC:Unidig1Bi2.VAL"
+   global ATT_STATUS_BIT_4
+       ATT_STATUS_BIT_4   = "13BMC:Unidig1Bi3.VAL"
+
+   global ATT_CONTROL_BIT_1
+       ATT_CONTROL_BIT_1  = "13BMC:Unidig1Bo4.VAL"
+   global ATT_CONTROL_BIT_2
+       ATT_CONTROL_BIT_2  = "13BMC:Unidig1Bo5.VAL"
+   global ATT_CONTROL_BIT_3
+       ATT_CONTROL_BIT_3  = "13BMC:Unidig1Bo6.VAL"
+   global ATT_CONTROL_BIT_4
+       ATT_CONTROL_BIT_4  = "13BMC:Unidig1Bo7.VAL"
+
+   ### Mono
+   global ENERGY_MOVING
+       ENERGY_MOVING      = ""
+   global MONO_FB1_ON
+       MONO_FB1_ON        = ""
+   global MONO_FB1_LOCKED
+       MONO_FB1_LOCKED    = ""
+
+   #global MONO_FB2_ON
+   #    MONO_FB2_ON        = ""
+   #global MONO_FB2_LOCKED
+   #    MONO_FB2_LOCKED    = ""
+
+   ### Traj
+   global TRAJ_IOC_PREFIX
+       TRAJ_IOC_PREFIX    = "13BMC:"
+
+   ### Scalers Temp until traj auto count bug is fixed
+   global SCALER_NAME     
+       SCALER_NAME        = "13BMC:scaler1"
+
+} 
+
 
 ############################################################################
 # Some new globals
@@ -75,10 +183,16 @@ t = ""
 # Define some convinient macros
 ############################################################################
 ## define a macro for CLEAN start
+
 def CLEAN_START '{
       local t
-#     t = USERMAC "/" SPEC "/" SPEC "_clean_start.mac" 
-      t = USERMAC "/psic/psic_clean_start.mac" 
+	p SPEC
+      # t = USERMAC "/" SPEC "/" SPEC "_clean_start.mac" 
+      if (SPEC == "psic_idc"){
+          t = USERMAC "/psic/psic_clean_start.mac" 
+      } else if (SPEC=="psic_bmc"){
+          t = USERMAC "/psic/psic_clean_start_bmc.mac" 
+      }
       qdofile(t)
 }'
 p "Run CLEAN_START to set default parameters"
@@ -90,5 +204,9 @@ def GSE_MACROS '{
       qdofile(t)
 }'
 p "Run GSE_MACROS to re-read macro defs"
-
 ############################################################################
+# Using a fresh start newfile name "temp_file" instead of "dev/null/" 
+# This does not stop setup_img at start if no newfile read in, SKG Dec07
+############################################################################
+p " Entering a temporary newfile temp_file"
+newfile temp_file
