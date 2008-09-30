@@ -1,5 +1,13 @@
 ####################################################################
-### Rod scan macros
+# Rod scan macros
+# T. Trainor
+# Mods:
+#  9-30-2005.  KT and TT, add change in pnt spacing near braggs,
+#              added two globals: RS_BRG_FILTER --> how close to get to Braggs
+#              and RS_SPC_FAC --> factor to increase pt density near braggs
+#
+#
+#
 ####################################################################
 #
 # Globals variables
@@ -21,7 +29,13 @@ global RS_MAX_SCAN_W
        RS_MAX_SCAN_W = 1;
 global RS_MIN_SCAN_W
        RS_MIN_SCAN_W = 0.1;
-
+## Sets up limit on how close to bragg peak one can go
+global RS_BRG_FILTER      
+       RS_BRG_FILTER = 0.1;                                          
+## Increases point density near bragg peak region by specified factor
+global RS_SPC_FAC                                                    
+       RS_SPC_FAC = 1;                                            
+       
 # these should be set by the caller
 global RS_SCALE_BY
        RS_SCALE_BY = 1;
@@ -211,17 +225,45 @@ def rod_scan '{
     max_cnt   = $7 
     l_b       = $8 
     del_lb    = $9
-
+    
+ ## start l-check block    
+ #{
+    #local l_val, bragg_flag, I    
     # calc num L points
-    num_l_pts = int( (l_en - l_st)/del_l );
-    del_sign = sign(num_l_pts);
-    num_l_pts = 1 + (  del_sign * num_l_pts) ;
+    #num_l_pts = int( (l_en - l_st)/del_l );
+    #num_l_pts = 1 + (  del_sign * num_l_pts) ;
+    
+    del_sign  = sign(l_en - l_st);
+    del_2     = del_l/RS_SPC_FAC;    
+    l_val     = l_st;
+    new_num_l_pts = 0;
+    
+    I_scale_max = RS_I_MAX_SCALE;  
+    I_scale_min = RS_I_MIN_SCALE;  
+    
+    while(fabs(l_val) <= fabs(l_en)) {
+         I = square( sin( PI*(l_val - l_b ) / del_lb ) ); 
+    
+         if(I >= 1/I_scale_min){
+             l_val = l_val + del_l*del_sign ;
+
+         } else if(I <= 1/I_scale_max) {
+             l_val= l_val + del_2*del_sign;
+
+         } else {
+             l_val = l_val + del_l*del_sign;
+
+         }
+         new_num_l_pts = new_num_l_pts + 1;
+    }
+ 
+    num_l_pts = new_num_l_pts;
     if (num_l_pts < 1) {
         msg_str = " Error: Num points < 1 "
         print msg_str
         exit
     }
-    
+
     ## Make an array of HKL, cnt_times, F-values and bragg flags 
     #   RS_ARRAY[j][0] = H;
     #   RS_ARRAY[j][1] = K;
@@ -229,45 +271,64 @@ def rod_scan '{
     #   RS_ARRAY[j][3] = count_time;
     #   RS_ARRAY[j][4] = I;
     #   RS_ARRAY[j][5] = bragg_flag;
-    #
-    #
+    #                  =  2 near a bragg peak, failed filter criteria, so skip if skip flag set
+    #                  =  1 near bragg peak use min cnt time
+    #                  = -1 near anti-Bragg, use max cnt time
+    #                  =  0 normal, scale cnt time
     local double array RS_ARRAY[num_l_pts][6]
-   {
-    local l_val, bragg_flag, I 
-    I_scale_max = RS_I_MAX_SCALE;  
-    I_scale_min = RS_I_MIN_SCALE;
-    for (j=0;j<num_l_pts;j++) {       
-       bragg_flag = 0;
-       RS_ARRAY[j][0] = h_val;
-       RS_ARRAY[j][1] = k_val;
-       RS_ARRAY[j][2] = l_val = l_st + (j)*(del_l)*(del_sign);
-       RS_ARRAY[j][3] = max_cnt;
-      
-       I = square( sin( PI*(l_val - l_b ) / del_lb ) ); 
-       if (I <= 1/I_scale_max){
-             RS_ARRAY[j][4] = I_scale_max;
-             RS_ARRAY[j][5] = 1;
-       } else if (I >= 1/I_scale_min){
-             RS_ARRAY[j][4] = I_scale_min;
-             RS_ARRAY[j][5] = -1;
-       } else {
+    l_val       = l_st; 
+    lb_check    = l_b
+
+	for (j=0;j<num_l_pts;j++) {       
+        bragg_flag = 0;
+        RS_ARRAY[j][0] = h_val;
+        RS_ARRAY[j][1] = k_val;
+        RS_ARRAY[j][3] = max_cnt;
+        I = square( sin( PI*(l_val - l_b ) / del_lb ) ); 
+
+        if ( fabs(l_val - lb_check) > del_lb/2.0 ){
+              lb_check = lb_check + del_sign*del_lb;
+        }
+
+        if (I >= 1/I_scale_min){
+            RS_ARRAY[j][2] = l_val;
+            RS_ARRAY[j][4] = I_scale_min;
+            RS_ARRAY[j][5] = -1;
+            l_val = l_val + del_l*del_sign ;
+        } else if (I <= 1/I_scale_max){
+            ### test if l_val vs lb +/- range
+            if (fabs(l_val - lb_check) < RS_BRG_FILTER) {      
+                RS_ARRAY[j][5] = 2; 
+            }  else  {
+                RS_ARRAY[j][5] = 1;
+            }
+            RS_ARRAY[j][2] = l_val;
+            RS_ARRAY[j][4] = I_scale_max;
+            l_val = l_val + del_2*del_sign ; 
+        } else {
+             RS_ARRAY[j][2] = l_val;
              RS_ARRAY[j][4] = 1/I;
              RS_ARRAY[j][5] = 0;
-       }
+             l_val = l_val + del_l*del_sign;
+        }
     }
-   }
+
+
+ #}  
+ ## end l-check block
 
    ## Now scale the cnt times by sqrt(1/I), 1/I or just use max
    if(RS_SCALE_BY != 0){
      for (j=0;j<num_l_pts;j++) {
-         if (RS_ARRAY[j][5] ==  1) {
+
+         if ( (RS_ARRAY[j][5] ==  1) || (RS_ARRAY[j][5] ==  2) ) {
               RS_ARRAY[j][3] = min_cnt;
          } else if (RS_ARRAY[j][5] == -1) { 
               RS_ARRAY[j][3] = max_cnt;
          } else {
               if(RS_SCALE_BY == 1){ 
                  RS_ARRAY[j][3]   = RS_ARRAY[j][3] * sqrt( 1 / RS_ARRAY[j][4] ) ;
-              } else if (RS_SCALE_BY == 2){
+              }  else if (RS_SCALE_BY == 2){
                  RS_ARRAY[j][3]   = RS_ARRAY[j][3] * 1 / RS_ARRAY[j][4] ;
               }
          }
@@ -390,8 +451,8 @@ if (RS_CHECK_SCAN == 0) {
        # st, en, np and ti may be adjusted within the loop
        local st, en, np, ti, t_scale;
        local check_scan_sat, check_scan_range, r_idx;
-       st =  -1*scan_range/2;
-       en =     scan_range/2;
+       st =  -1*scan_range/2.;
+       en =     scan_range/2.;
        np =     num_scan_pts;
        t_scale = 1;
 
@@ -419,7 +480,7 @@ if (RS_CHECK_SCAN == 0) {
            ti     = RS_ARRAY[j][3];
 
            ## if its a bragg skip it
-           if ( (RS_ARRAY[j][5] == 1) && (RS_SKIP_BRAGGS == 1) ) {
+           if ( (RS_ARRAY[j][5] == 2) && (RS_SKIP_BRAGGS == 1) ) {
               printf("\n**************************************************\n");
               printf("%s\n",RS_SCAN_TITLE);
               msg_str = sprintf("#Skip L = %g, Bragg Peak", L_scan);
@@ -474,12 +535,20 @@ if (RS_CHECK_SCAN == 0) {
                       waitmove
 
                           ##### hack to prevent phi crash
-                          zzz = (180 - fabs( A[8] ) ); 
-                          if ( (fabs(st) > zzz  ) || ( fabs(en) > zzz ) ){
-                              dscan $6 -zzz/2 zzz/2 np ti*t_scale  
-                           } else {
-                               dscan $6 st en np ti*t_scale 
-                           } 
+                          if ($6 == 8){
+						zzz = (180 - fabs( A[8] ) ); 
+                          	if ( (fabs(st) > zzz  ) || ( fabs(en) > zzz ) ){
+						print "**************** Warning **********************"
+						print "kphi will pass through limit, truncating range"
+						print "New kphi range = +/-" zzz/2
+						print "***********************************************"
+                              	dscan $6 -zzz/2. zzz/2. np ti*t_scale  
+					} else {
+						dscan $6 st en np ti*t_scale
+					}
+				}else {
+					dscan $6 st en np ti*t_scale
+					} 
                    }
 
                    sc_anal_arr[num_rep][0]  = 0;
