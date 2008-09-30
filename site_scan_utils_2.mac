@@ -1,7 +1,8 @@
 
 ##########################################################################################
 ##########################################################################################
-#  Analysis Stuff                                                                        #
+#  Analysis Stuff  
+#                                                                            
 ##########################################################################################
 ##########################################################################################
 
@@ -91,8 +92,8 @@ def SC_ANAL( sc_x_array, sc_y_array, num_pts, prsd_cutoff, nave) '{
         summary_data_array[0][3] = array_op("fwhm", sc_x_array[0:num_pts-1] ,sc_y_array[0:num_pts-1]);
         summary_data_array[0][4] = array_op("cfwhm",sc_x_array[0:num_pts-1] ,sc_y_array[0:num_pts-1]);
 
-        # do integration, use 5 bgr points
-        test_int = SC_INT( sc_x_array[0:num_pts-1][0], sc_y_array[0:num_pts-1][0], num_pts, 5);
+        # do integration, use 2 bgr points
+        test_int = SC_INT( sc_x_array[0:num_pts-1][0], sc_y_array[0:num_pts-1][0], num_pts, 2);
 
         if (test_int == 1){                           # int ok
            summary_data_array[0][5] = SC_INT_I;
@@ -382,8 +383,8 @@ def SC_WIDTH(scan_init) '{
 #       fw_low = tmp1;
 #   }
 
-   # integrate to see if there is a peak, use 3 bgr points
-   test_int = SC_INT( DAT_X, DAT_Y, NPTS, 3);
+   # integrate to see if there is a peak, use 2 bgr points
+   test_int = SC_INT( DAT_X, DAT_Y, NPTS, 2);
    if (test_int != 1){               # if the int failed
        p "Cant get width info, integration failed"
        scan_bad = ret_array[0] = 2;
