@@ -20,6 +20,7 @@
 #			HKL from input computed A[i] values                   
 #    Jan-2007     PJE changed def traj_init so that it takes a global for the scaler PV.
 #    Jun-15-2007  MLR commented out calcP_fromR for TRAJ_USE_ACTUAL = 0
+#    Nov-23-2007  SKG added new header in the data file for hklscan (del, eta, chi,phi,nu, mu)
 # This file provides replacements for the following macros in the standard SPEC
 # macro file "standard.mac".
 #   _ascan
@@ -354,7 +355,8 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
         { X_L = "H"; _sx = _s1; _fx = _f1 }
     Y_L = cnt_name(DET)
     _stype = 2
-    FPRNT="H  K  L  "
+    # SKG introduced new header information for hkl scan Nov07
+    FPRNT="H  K  L  del  eta  chi  phi  nu  mu  "
     PPRNT=""
     for (i=0;i<_numgeo;i++)
             PPRNT=sprintf("%s%8.8s ",PPRNT,motor_name(mA[i]))
@@ -422,6 +424,11 @@ Usage:  hklscan Hstart Hfinish Kstart Kfinish Lstart Lfinish intervals time"
         for (i=0;i<COUNTERS;i++) S[i]=_traj_counts[i][NPTS]
         S[sec] = S[sec]/TRAJ_CLOCK_SCALE
         FPRNT=sprintf("%g %g %g ",h_ca,k_ca,l_ca)
+        # SKG introduced new header information for hkl scan Nov07
+        for (m=0;m<6;m++){
+			FPRNT=sprintf("%s  %8.4f ",FPRNT,A[mA[m]])
+		}
+
         PPRNT=""
         for (i=0;i<_numgeo;i++)
             PPRNT=sprintf("%s%8.4f ",PPRNT,A[mA[i]])
@@ -743,7 +750,8 @@ def traj_build '{
         eprint "Usage: traj_scan nels npts"
         exit
     }
-
+    
+    # Setup EPICS Trajectory Scan
     _pv = TRAJ_NAME "TimeMode";  epics_put(_pv, "Per element")
     _pv = TRAJ_NAME "MoveMode";  epics_put(_pv, "Relative")
     _pv = TRAJ_NAME "Nelements"; epics_put(_pv, $1)
@@ -770,21 +778,50 @@ def traj_build '{
      # Write to database fields
      # We use the "wait" argument to epics_put so it uses ca_put_callback,
      # and we are sure things are accepted before we start counting
-     # Need to convert path from string to byte array
-     array _temp[256]
-     _temp = PILATUS_IMAGE_DIR
-     # Do not overwrite path for now
-     #epics_put(PILATUS_IMGPATH_PV,_temp, 1)
-     img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
+     
+     if (PILATUS_WRITE_FILES){  
+         dstr = split(DATAFILE,splt_dstr,".")
+         # Warning the path below cab over flowed the pilatus path string buffer if string longer than 156
+         # PJE is including it now as a test.  Need to look into making string buffer larger
+         # PJE 2/22/08
+         _img_path = sprintf("%s/%s/S%.3d",PILATUS_IMAGE_DIR,splt_dstr[0],SCAN_N)
+         # p _img_path
+         array _temp[256]
+         _temp = _img_path
+         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
+         img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
+         _fileformat = "%s%s_%.3d.tif"
+         # print img_fname
+     } else {
+         array _temp[256]
+         _temp = PILATUS_IMAGE_DIR 
+         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
+         img_fname = "000test"
+         _fileformat = "%s%s.tif"
+         #print img_fname
+     }
+
      epics_put(PILATUS_FNAME_PV,img_fname,1)
      epics_put(PILATUS_FILENUMBER_PV,0,1)
-     _fileformat = "%s%s_%.3d.tif"
      epics_put(PILATUS_FILEFORMAT_PV,_fileformat,1)
      epics_put(PILATUS_NFRAME_PV, $2, 1)
-     epics_put(PILATUS_ACQMODE_PV,1,1)  # External enable
+     
+     if (SPEC == "psic_idc"){
+#        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Triger
+#       epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
+        epics_put(PILATUS_ACQMODE_PV,1,1)  # Ext Enable
+     }
+     else
+     {
+        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Triger
+        epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
+     }	  
 
      # hit the triggers
      epics_put(PILATUS_ACQ_PV,1)
+     # Wait for Pilatus to be armed before moving on. PJE 1/23/08
+     while (epics_get(PILATUS_ARMED_PV) == "Unarmed") sleep(0.1)
+
    }
 }'
 
@@ -810,7 +847,23 @@ def traj_exec '{
         _pv = TRAJ_NAME "ExecMessage"
         mess = epics_get(_pv)
         eprintf("Trajectory execution failed, error message = %s", mess)
-        exit
+       
+       # Check to see if we are using the Pilatus.  If we are the
+       # Pilatus is expecting to be triggered and we need to 
+       # abort the Pilatus otherwise it will go into DMA timeout mode  - Bad!  PJE 12/12/07
+       if (EPICS_COUNT == 4){
+           print "  Abort Pilatus"
+           print "Aborting Pilatus waiting 40 sec for timeout."
+           epics_put(PILATUS_ABORT_PV,1)
+
+           # This sleep is a bit of a klug since we do not have any way
+           # telling when the pilatus is ready again.  I measured it a 33 sec
+           # so I am waiting 40 sec to be sure.
+
+           sleep(40)
+           print " Done waiting for the Pilatus hopfully it is ready."
+       }
+       exit
     }
 
 }'
@@ -831,11 +884,11 @@ def traj_read_counts '{
     while (epics_get(_pv) != "Done") sleep(0.1)
 
     # Wait for Pilatus to be done acquiring. 
-    # Use this for img_off case if (EPICS_COUNT == 4) 
-
+    # Use this for img_on case 
+    if (EPICS_COUNT == 4) {
         while (epics_get(PILATUS_ACQ_PV) != "Done") sleep(0.1)
+     }
     
-
     # add this to wait for readback since we need to check the number of points
     #_pv = TRAJ_NAME "Readback"
     #while (epics_get(_pv) == "Busy") sleep(0.1)
