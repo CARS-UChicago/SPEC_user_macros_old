@@ -157,10 +157,18 @@ def epics_xrf_med_count '{
      }
 
      # put to the other data field
-     epics_put(data_host_pv,data_host)
-     epics_put(data_folder_pv,data_folder)
-     epics_put(data_sfolder_pv,data_sub_folder)
-     epics_put(data_filebase_pv,data_fname)
+     array _temp[256]
+     _temp = data_host
+     epics_put(data_host_pv,_temp)
+     array _temp[256]
+     _temp = data_folder
+     epics_put(data_folder_pv,_temp)
+     array _temp[256]
+     _temp = data_sub_folder
+     epics_put(data_sfolder_pv,_temp)
+     array _temp[256]
+     _temp = data_fname
+     epics_put(data_filebase_pv,_temp)
      epics_put(data_fileformat_pv,data_ffname)
      epics_put(data_fileext_pv,data_fext)
 
