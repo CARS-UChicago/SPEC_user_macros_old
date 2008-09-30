@@ -74,12 +74,14 @@ def _ascan '
 	scan_head
 	PFMT=sprintf("%%s%%8.%df ",UP)
 	VFMT=sprintf("%%s%%9.%df ",UP)
-      _A0 = A
-	def _scan_on \'
+    	_A0 = A
+	 def _scan_on \'
 	 for (; NPTS < _n1; NPTS++) {
 		local i
-		for (i=0;i<9;i++) A[i] = _A0[i]
-		for (i=0;i<_nm;i++)
+                # This logic fixes the drift on non-moving axes with compound motors
+                # but it fails when scanning real motors, so eliminate it for now
+                #for (i=0; i<9; i++) A[i] = _A0[i]
+		for (i=0;i<_nm;i++) 
 			A[_m[i]] = _s[i] + NPTS * _d[i]
 
             ### check to see if this is a fake scan
