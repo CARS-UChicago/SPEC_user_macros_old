@@ -15,9 +15,16 @@
 ## Changed MED_PV = "13GE2:med" to MED_PV = "13GE3:med"
 ## and MED_NUM_DET = 16 MED_NUM_DET = 8
 ############################################################################
-
-
-############################################################################
+##
+## New macro for XRF data collection   March 2007, SKG
+## Now epics MCA macro is inserted for XRF data collection, 
+## data collection system is handled with PYTHON script, which 
+## runs in another machine(now SONATA), New epics_mca_count will
+## handle the mca triggering, data base and ROIs
+## new macro commands xrf_on, xrf_off,epics_xrf_counts,setup_xrf
+## common macros user_getcounts, ct,_loop,
+## on xrf_on condition ct triggers the detector but does not wrtite xrf files
+## 
 ############################################################################
 #                 convinient shortcut macros                               #
 ############################################################################
@@ -32,6 +39,7 @@ def traj_scans_on '{
     local t
     t = USERMAC "/traj_scans1.mac"
     qdofile(t)
+    setplot 1154
     IS_TRAJ_SCAN = 1;
 }'
 
@@ -39,6 +47,7 @@ def traj_scans_off '{
     local t
     t = USERMAC "/point_scans1.mac"
     qdofile(t)
+    setplot 1155
     IS_TRAJ_SCAN = 0;
 }'
 
@@ -97,9 +106,16 @@ def gse_cleanup '{
         rod_scan_cleanup;
         close(RS_SUM_FILE);
     } 
-    if(IS_EPICS_MED_COUNT){
-       # IS_EPICS_MED_COUNT = FALSE;
+
+    if (EPICS_COUNT == 4){
+        print "  Abort Pilatus"
+        epics_put(PILATUS_ABORT_PV,1)
     }
+       
+
+    #if(IS_EPICS_MED_COUNT){
+    #   # IS_EPICS_MED_COUNT = FALSE;
+    #}
   
 }'
 
@@ -121,10 +137,9 @@ cdef("cleanup_always"," ; gse_cleanup; ","gse");
 ## see def of move_em
 ## wait for feedback to lock after any move ... 
 def user_postmove '{ 
-
-      while (epics_get("13IDA:E:Moving") == "Busy") sleep(0.1)
-
-     # while (epics_get("13IDA:E:Moving") == 1) sleep(0.1)
+	if (SPEC == "psic_idc"){
+          while (epics_get(ENERGY_MOVING) == "Busy") sleep(0.1)
+      }
 }'
 ############################################################################
 
@@ -134,433 +149,227 @@ def user_postmove '{
 ## use to make sure the mono feedback is locked
 ## bf counting (note: this is not called during traj_scans...)
 def user_precount '{
-
-#   if ( epics_get("13IDA:mono_pid1.FBON") ==  "On" ){
-#      if (epics_get("13IDA:mono_pid1Locked") == 0) printf("Waiting for beam\n")
-#      while (epics_get("13IDA:mono_pid1Locked") == 0) sleep(0.1)
-#   }
-#
-
-   if ( epics_get("13IDA:mono_pid2.FBON") ==  "On" ){
-      if (epics_get("13IDA:mono_pid2Locked") == 0) printf("Waiting for beam\n")
-      while (epics_get("13IDA:mono_pid2Locked") == 0) sleep(0.1)
-   }
-
-
+      ## Checking for locked feedback is not yet setup for BMC
+	if (SPEC == "psic_idc"){
+   		check_beam
+	}
 }'
 ############################################################################
-
+# check beam
 ############################################################################
 ## check_beam
 ## use to make sure the mono feedback is locked
 ## bf counting (note: this is not called during traj_scans...)
 def check_beam '{
-
-   #if ( epics_get("13IDA:mono_pid1.FBON") ==  "On" ){
-   #   if (epics_get("13IDA:mono_pid1Locked") == 0) printf("Waiting for beam\n")
-   #   while (epics_get("13IDA:mono_pid1Locked") == 0) sleep(0.1)
-   #}
-
-   if ( epics_get("13IDA:mono_pid2.FBON") ==  "On" ){
-      if (epics_get("13IDA:mono_pid2Locked") == 0) printf("Waiting for beam\n")
-      while (epics_get("13IDA:mono_pid2Locked") == 0) sleep(0.1)
+   if (SPEC == "psic_idc"){
+      if ( epics_get(MONO_FB1_ON) ==  "On" ){
+         if (epics_get(MONO_FB1_LOCKED,"short") == 0) printf("Waiting for beam\n")
+         while (epics_get(MONO_FB1_LOCKED,"short") == 0){
+             if (epics_get(MONO_FB1_ON) == "Off") break 
+             sleep(0.01)
+         }
+      }
    }
-
 }'
 ############################################################################
 
+
 ############################################################################
-## setup mca detectors
-## use this macro to set up the use of mca detector
-## This assumes that the mca is set up in the spec config file
-## 
-## globals
-global USE_MCA
-global MCA_ROI_PV_NAME
-global MCA_ROI_PV_NAME_2
-global MCA_ROI_PV_NAME_3
+## Routines for setting up counting macros and globals
+## We assume that spec has been configured with 3 rois in the scaler array
+## (required for mca, med and xrf count routines), and one roi name iroi
+## for the image detector.  See the spec config file 
+##
+############################################################################
+##
+## Global flags deciding how to do the count
+# EPICS_COUNT = 0  use only spec default count routine, no epics rois etc
+# EPICS_COUNT = 1  use spec default count routine, but read some mca roi pvs
+# EPICS_COUNT = 2  use the epics_med count routine (deprecated)
+# EPICS_COUNT = 3  use the epics_xrf count routine (replaced epics_med, no need for catcher program)
+# EPCIS_COUNT = 4  use the epics_img count routing for pilatus image detector
+# EPCIS_COUNT = 5  use the epics_xrf_med count (multielement det)
 
-if( unset("USE_MCA") )            USE_MCA = FALSE;
-if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME = "";
-if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME_2 = "";
-if( unset("MCA_ROI_PV_NAME") )    MCA_ROI_PV_NAME_3 = "";
+global EPICS_COUNT
+if( unset("EPICS_COUNT") ) EPICS_COUNT = 0
 
+global EPICS_COUNT_SETUP
+if( unset("EPICS_COUNT_SETUP") ){
+    EPICS_COUNT_SETUP[0] = 1
+    EPICS_COUNT_SETUP[1] = 0
+    EPICS_COUNT_SETUP[2] = 0  
+    EPICS_COUNT_SETUP[3] = 0
+    EPICS_COUNT_SETUP[4] = 0
+    EPICS_COUNT_SETUP[5] = 0
+}
+
+###################################
+## Setup for mca counting
+## use spec default count routine, but read some mca roi pvs
+## ie spec triggers the epics mca detector
+
+do_user_mac("cnt_macs/mca_cnt.mac")
 
 def setup_mca '{
-     local num_mca, j
-     num_mca = mca_sel("?")
-
-     # loop through and disable all the devices
-     for (j=0;j<num_mca;j++)  mca_spar(j,"disable",1)
-
-     USE_MCA = getval("Enter 1 to turn on mca, 0 for off",USE_MCA)
-
-     if (USE_MCA){
-         # If we can get the device names ...
-         # name = mca_par("device_id")
-         # or mca_spar(j,"device_id")
-         # then print the options and choose the detector from the list
-         #
-         # select the detector
-         # mca_sel(xx)
-         # this is now the detector which gets all the mca_par calls..
-         #
-         # enable the detector
-         # and turn on reset (ie erase before start )
-         mca_par("disable",0)
-         mca_par("soft_preset",1)
-
-         # below we should get automatically..
-         # if we have the det names
-         #MCA_ROI_PV_NAME    = getval("Enter mca ROI PV name","13IDC:aim_adc1.R0");
-         #MCA_ROI_PV_NAME_2    = getval("Enter mca ROI PV name","13IDC:aim_adc1.R1");
-         #MCA_ROI_PV_NAME_3    = getval("Enter mca ROI PV name","13IDC:aim_adc1.R2");
-         MCA_ROI_PV_NAME    = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME);
-         MCA_ROI_PV_NAME_2    = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME_2);
-         MCA_ROI_PV_NAME_3    = getval("Enter mca ROI PV name",MCA_ROI_PV_NAME_3);
-
-
-     }
-
+    _setup_mca
+    EPICS_COUNT_SETUP[1] = 1
+    mca_on
 }'
 
-############################################################################
-## epics_med_count
-## use to trigger an epics MED and an epics scaler
-## This routine is used in place of specs count routine when you want 
-## run with an MED and scaler.  Note that the spec count routine already
-## handles an EPCIS MCA, so thats not included here.  
-## To read the rois for the MED (and MCA) see the user_getcounts macro
-## 
+def mca_on '{
+    if (EPICS_COUNT_SETUP[1] == 0){
+        print "You must run setup_mca"
+    }else{ 
+        EPICS_COUNT = 1;
+        print "MCA_ON" 
+    }
+}'
 
-# globals
-# use below flag in _loop macro 
-global IS_EPICS_MED_COUNT
-global MED_PV
-global MED_NUM_DET
-array ICR_ARRAY[4]
+def mca_off '{
+    EPICS_COUNT = 0;
+    print "MED_OFF" 
+}'
 
-if( unset("IS_EPICS_MED_COUNT") )   IS_EPICS_MED_COUNT = FALSE
-if( unset("MED_PV") )               MED_PV = "13GE3:med:"
-if( unset("MED_NUM_DET") )          MED_NUM_DET = 8
-if( IS_EPICS_MED_COUNT == FALSE ) array MED_BAD_DETS[8]
+###################################
+## Setup for med couting
+## use the epics_med count routine (deprecated)
+## requires cather program if you want to write med files
 
-##
-## need to make sure mca is off if med is on???
-##
+do_user_mac("cnt_macs/med_cnt.mac")
+
 def setup_med '{
-     local j, str
-
-     IS_EPICS_MED_COUNT = getval("Enter 1 to use MED, 0 for off",IS_EPICS_MED_COUNT)
-     if(IS_EPICS_MED_COUNT){
-            MED_PV = getval("Enter MED pv prefix",MED_PV)
-            MED_NUM_DET = getval("Enter the number of detectors",MED_NUM_DET)
-            for(j=0;j<MED_NUM_DET;j++){
-                  str = "Enter 1 if detector is bad, 0 for ok: det "
-                  str = sprintf("%s %d",str, j+1)
-                  MED_BAD_DETS[j] = getval(str,MED_BAD_DETS[j])
-            }
-     }
-
+    _setup_med
+    EPICS_COUNT_SETUP[2] = 1
+    med_on
 }'
 
-##
-def med_on ' 
-   IS_EPICS_MED_COUNT = TRUE 
-
-   if (MED_PV == ""){
-       eprint "MED_PV unset, run setup_med first!"
-       exit
-   }
-   if ($# < 1){
-      MED_WRITE_FILES = getval("Enter 1 to write med files, 0 for off",MED_WRITE_FILES)
-      if (MED_WRITE_FILES){
-        # this only works with python version
-        MED_DATA_DIR = getval("Enter med data dir",MED_DATA_DIR)
-      }
-   } else {
-      MED_WRITE_FILES = $1
-   }
-   med_cw_desc_pv = sprintf("%s%s",MED_PV,"ClientWait.DESC")
-   epics_put(med_cw_desc_pv,"spec_default.dat")
-   print "MED_ON" 
-'
-def med_off ' 
-   IS_EPICS_MED_COUNT = FALSE
-   print "MED_OFF" 
-'
-
-def ep_cnt ' epics_med_count '
-
-######################################
-##  New version, dont use this untill
-##   the python stuff is working!!!
-##  This requires a scanner database
-##  and external prog for writing data files...
-##
-
-MED_WRITE_FILES = FALSE
-MED_DATA_DIR = '.'
-
-def epics_med_count2 '{
-     # local cnt_time_val, sc_pv, med_pv
-     # local sc_prtm_pv, sc_cnt_pv  
-     # local med_prtm_pv, med_cnt_pv, med_acq_pv   
-
-     if ($# != 1){
-         eprint "Useage: time "
-         exit
-     } 
-
-     if (MED_PV == ""){
-         eprint "MED_PV unset"
-         exit
-     }
-
-     cnt_time_val = $1
-
-     # base pv names, assume scaler 0 is an epics device
-     # thats being used for all the scaler detectors
-     sc_pv = counter_par(0,"device_id");
-     med_pv = MED_PV;
-
-     # preset time and count for scaler
-     sc_prtm_pv = sprintf("%s.%s",sc_pv,"TP") 
-     sc_cnt_pv  = sprintf("%s.%s",sc_pv,"CNT")
-
-     # preset time, EraseStart, Aquiring
-     # and client wait pvs
-     med_prtm_pv = sprintf("%s%s",med_pv,"PresetReal")
-     sleep(.3)
-     med_cnt_pv  = sprintf("%s%s",med_pv,"EraseStart")
-     med_acq_pv  = sprintf("%s%s",med_pv,"Acquiring")
-
-   
-     # put the count times
-     epics_put(sc_prtm_pv,cnt_time_val)
-     epics_put(med_prtm_pv,cnt_time_val)
- 
-
-     # user pre count stuff
-     user_precount
-
-     # hit the triggers and wait for done
-     epics_put(med_cnt_pv,1)
-     while( epics_get(med_acq_pv,"short") == 0) sleep(0.1);
-     epics_put(sc_cnt_pv,1)
-
-     # wait for scaler and med to finish
-     status = 1
-     sc_done = FALSE
-     med_done = FALSE
-     cw_busy  = FALSE
-     while(status){
-        sleep(0.1)
-        if (epics_get(sc_cnt_pv)=="Done"){
-             sc_done = TRUE;
-            # p "scaler done"
-        }
-        if (epics_get(med_acq_pv,"short") == 0){
-            med_done = TRUE;
-           # p "med done"
-        }
-        if( (sc_done==TRUE) && (med_done==TRUE) ) status = 0;
-     }
-
-     # write files if want em
-     if ( MED_WRITE_FILES == TRUE ) {
-
-         # scanner data base pvs
-         med_request_write_pv   = "13IDC:edb:Request"
-         med_request_go = 1
-         med_request_done = 0
-         med_file_pv   = "13IDC:edb:file"
-         med_dir_pv   = "13IDC:edb:dir"
-
-         # make file name
-         nstr = split(DATAFILE,splt_str,"/") 
-         med_fname = sprintf("%s_%.3d.%.3d",splt_str[nstr-1],SCAN_N,NPTS)
-      
-         # put to the data base
-         # note looks like spec cant handle waveform records,
-         # ie these epics_puts dont work, therefore
-         # have to use shell!!!!!
-
-         ###epics_put(med_file_pv,med_fname)
-         cmd_string =  sprintf("caput %s %s" ,med_file_pv, med_fname)
-         unix(cmd_string)
-
-         ###epics_put(med_dir_pv,MED_DATA_DIR)
-         cmd_string =  sprintf("caput %s %s" ,med_dir_pv, MED_DATA_DIR)
-         unix(cmd_string)
-
-         # ask for write file
-         sleep(0.1)
-         epics_put(med_request_write_pv,med_request_go)
-         check_request_stat = med_request_go
-         #print "here1"
-         #print check_request_stat
-         while ( check_request_stat == med_request_go){
-             #print "here"
-             check_request_stat = epics_get(med_request_write_pv,"short")              
-             #print check_request_stat
-             sleep(0.2)
-         }
-
-     }
-
-     # use the get_counts routine to read the scalers
-     # note get_counts also calls user_getcounts
-     # thats where the rois get read.
-     get_counts
-
-}'
-
-########################################################
-##  Original version using the client wait field of med    
-##
-def epics_med_count '{
-     # local cnt_time_val, sc_pv, med_pv
-     # local sc_prtm_pv, sc_cnt_pv  
-     # local med_prtm_pv, med_cnt_pv, med_acq_pv   
-
-     if ($# != 1){
-         eprint "Useage: time "
-         exit
-     } 
-
-     if (MED_PV == ""){
-         eprint "MED_PV unset"
-         exit
-     }
-
-     cnt_time_val = $1
-
-     # base pv names, assume scaler 0 is an epics device
-     # thats being used for all the scaler detectors
-     sc_pv = counter_par(0,"device_id");
-     med_pv = MED_PV;
-
-     # preset time and count for scaler
-     sc_prtm_pv = sprintf("%s.%s",sc_pv,"TP") 
-     sc_cnt_pv  = sprintf("%s.%s",sc_pv,"CNT")
-
-     # preset time, EraseStart, Aquiring
-     # and client wait pvs
-     med_prtm_pv = sprintf("%s%s",med_pv,"PresetReal")
-     med_cnt_pv  = sprintf("%s%s",med_pv,"EraseStart")
-    #med_cnt_pv  = sprintf("%s%s",med_pv,"StartAll")
-     med_acq_pv  = sprintf("%s%s",med_pv,"Acquiring")
-     med_ecw_pv   = sprintf("%s%s",med_pv,"EnableClientWait")
-     med_cw_pv   = sprintf("%s%s",med_pv,"ClientWait")
-     med_cw_desc_pv = sprintf("%s%s",med_pv,"ClientWait.DESC")
-
-     # put the count times
-     epics_put(sc_prtm_pv,cnt_time_val)
-     epics_put(med_prtm_pv,cnt_time_val)
- 
-
-     # put the file name in case we are dumping spectra files
-     {
-     #med_fname = DATAFILE "_" SCAN_N "_" NPTS ".xrf"
-     nstr = split(DATAFILE,splt_str,"/") 
-     # med_fname = sprintf("%s_%.3d_%.3d.xrf",splt_str[nstr-1],SCAN_N,NPTS)
-     med_fname = sprintf("%s_%.3d.%.3d",splt_str[nstr-1],SCAN_N,NPTS)
-     epics_put(med_cw_desc_pv,med_fname)
-     #xx = epics_get(med_cw_desc_pv)
-     #print xx
-     sleep(0.3)
-     epics_put(med_cw_desc_pv,med_fname)
-     #sleep(0.1)
-     epics_put(med_cw_desc_pv,med_fname)
-     }
-
-     # user pre count stuff
-     user_precount
-
-     # hit the triggers
-     xx_cnt = 0
-     epics_put(med_cnt_pv,1)
-     while( epics_get(med_acq_pv,"short") == 0){
-         sleep(0.05);
-         xx_cnt = xx_cnt + 1;         
-         if (xx_cnt > 20){
-             xx_cnt = 0;
-             print "Warning waiting for med aquiring";
-         }
-     }
-     epics_put(sc_cnt_pv,1)
-
-     # wait for scaler and med to finish
-     status = 1
-     sc_done = FALSE
-     med_done = FALSE
-     cw_busy  = FALSE
-     while(status){
-        sleep(0.3)
-        if (epics_get(sc_cnt_pv)=="Done"){
-             sc_done = TRUE;
-             #p "scaler done"
-        }
-        if (epics_get(med_acq_pv,"short") == 0){
-            med_done = TRUE;
-            #p "med done"
-        }
-        if (MED_WRITE_FILES==TRUE){
-           # wait for client wait to go done if 
-           # client wait is enabled
-           if( epics_get(med_ecw_pv,"short") == 1){
-               cw_busy =  epics_get(med_cw_pv,"short")
-           }
+def med_on '{
+    if (EPICS_COUNT_SETUP[2] == 0){
+        print "You must run setup_med"
+    }else{ 
+       if ($# ==0){
+            _med_on
         } else {
-           cw_busy = FALSE
+            _med_on $1
         }
-        if( (sc_done==TRUE) && (med_done==TRUE) && (cw_busy==FALSE) ) status = 0;
-     }
-
-     # if client wait is enabled wait for the client wait
-     # field to go done
-     #p "here"
-     #p epics_get(med_ecw_pv,"short") 
-     #if( epics_get(med_ecw_pv,"short") == 1){
-     #   p epics_get(med_cw_pv,"short")
-     #   while( epics_get(med_cw_pv,"short") == 1) {
-     #       sleep(0.1);
-     #       p "waiting for client"
-     #   }
-     #}
-
-     # use the get_counts routine to read the scalers
-     # note get_counts also calls user_getcounts
-     # thats where the rois get read.
-     get_counts
-   
-     sleep(1)
-     
-
+        EPICS_COUNT = 2;
+        print "MED_ON" 
+    }
 }'
-#
-#
-#
-#
+
+def med_off '{
+    EPICS_COUNT = 0;
+    print "MED_OFF" 
+}'
+
+###################################
+## Setup for xrf couting
+## use the epics_xrf count routine 
+## replaced epics_med, no need for catcher program
+
+do_user_mac("cnt_macs/xrf_cnt.mac")
+
+def setup_xrf '{
+    _setup_xrf
+    EPICS_COUNT_SETUP[3] = 1
+    xrf_on
+}'
+
+def xrf_on '{
+    if (EPICS_COUNT_SETUP[3] == 0){
+        print "You must run setup_xrf"
+    }else{ 
+       if ($# ==0){
+            _xrf_on
+        } else {
+            _xrf_on $1
+        }
+        EPICS_COUNT = 3;
+        print "XRF_ON" 
+    }
+}'
+
+def xrf_off '{
+    EPICS_COUNT = 0;
+    print "XRF_OFF" 
+}'
+
+###################################
+## Setup for image detector (pilatus)
+
+do_user_mac("cnt_macs/image_cnt.mac")
+
+def setup_img '{
+    _setup_img
+    EPICS_COUNT_SETUP[4] = 1
+    img_on
+}'
+
+def img_on '{
+    if (EPICS_COUNT_SETUP[4] == 0){
+        print "You must run setup_img"
+    }else{ 
+        if ($# ==0){
+            _img_on
+        } else {
+            _img_on $1
+        }
+        EPICS_COUNT = 4;
+        print "IMG_ON" 
+    }
+}'
+
+def img_off '{
+    EPICS_COUNT = 0;
+    print "IMG_OFF"    
+}'
+
+###################################
+## Setup for xrf_med counting
+## use the epics_xrf_med count routine 
+## replaced epics_med, no need for catcher program
+
+do_user_mac("cnt_macs/xrf_med_cnt.mac")
+
+def setup_xrf_med '{
+    _setup_xrf_med
+    EPICS_COUNT_SETUP[5] = 1
+    xrf_med_on
+}'
+
+def xrf_med_on '{
+    if (EPICS_COUNT_SETUP[5] == 0){
+        print "You must run setup_xrf"
+    }else{ 
+       if ($# ==0){
+            _xrf_med_on
+        } else {
+            _xrf_med_on $1
+        }
+        EPICS_COUNT = 5;
+        print "XRF_MED_ON" 
+    }
+}'
+
+def xrf_med_off '{
+    EPICS_COUNT = 0;
+    print "XRF_MED_OFF" 
+}'
+
 ############################################################################
-## user_getcounts
+## user_getcounts   
 ## user_getcounts is called in the macro get_counts
 ## which is called from scan_count within the _loop macro 
 ## its used here to add an epics pv to the scalers
 ## Note this will only be used during point scans!
 ## ie its not called during traj scans
 ##
-## scalar 5 is a dummy scalar, use this to store the value of an 
-## roi from an epics mca detector.
-##
-## note for an med may want to put the sum of all the detectors 
-## into the scalar??
-
+############################################################################
 def user_getcounts '{
     local pv_roi, j, pv
-
-    if (USE_MCA){
+    
+    # using mca triggered from spec
+    if (EPICS_COUNT == 1){
          S[roi1] = 0; S[roi2] = 0; S[roi3] = 0;
          # need this to wait for mca software to finish the calc
          sleep(.3)
@@ -570,7 +379,9 @@ def user_getcounts '{
          S[roi2] = epics_get(pv_roi)
          pv_roi = MCA_ROI_PV_NAME_3
          S[roi3] = epics_get(pv_roi)
-    } else if( (IS_EPICS_MED_COUNT==1) && (MED_PV != "") ) {
+
+    # using med count routine
+    } else if( EPICS_COUNT == 2) {
          S[roi1] = 0; S[roi2] = 0; S[roi3] = 0;
          for(j=0;j<MED_NUM_DET;j++ ){
             #print "get roi"
@@ -588,57 +399,183 @@ def user_getcounts '{
                S[roi3] = S[roi3] + epics_get(pv)
             }
          }
-         #### 3-20-03, T2
-         #### note used for ge det in 4-element mode!!!
-         #### python catcher prog is broken!!!
-         #### see the Fheader stuff etc....
-         # ICR_ARRAY[0] = 0; ICR_ARRAY[1] = 0; ICR_ARRAY[2] = 0; ICR_ARRAY[3] = 0;
-         # pv = "13GE1:med:scaler1.S4"
-         # ICR_ARRAY[0] = epics_get(pv)
-         # pv = "13GE1:med:scaler1.S8"
-         # ICR_ARRAY[1] = epics_get(pv)
-         # pv = "13GE1:med:scaler1.S12"
-         # ICR_ARRAY[2] = epics_get(pv)
-         # pv = "13GE1:med:scaler1.S16"
-         # ICR_ARRAY[3] = epics_get(pv)
-    } 
 
- 
-    #pv = MCA_PV_NAME
-    #fname, ret
-    # should use scanf here...
-    #fname = DATAFILE "_" SCAN_N "_" NPTS ".xrf"
-    #str = sprintf("write_mca  %s  %s",pv,fname)
-    # ret val is 1 if it couldnt write the file
-    #ret = unix(str)
- 
+    # using xrf count routine
+    } else if( EPICS_COUNT == 3 ) {
+        S[roi1] = 0; S[roi2] = 0; S[roi3] = 0;
+        # need this to wait for mca software to finish the calc
+        sleep(.1)
+        S[roi1] = 0; S[roi2] = 0; S[roi3] = 0;
+
+        pv = sprintf("%s.%s",XRF_PV,"R0")    
+        S[roi1] = S[roi1] + epics_get(pv)
+         
+        pv = sprintf("%s.%s",XRF_PV,"R1")
+        S[roi2] = S[roi2] + epics_get(pv)
+
+        pv = sprintf("%s.%s",XRF_PV,"R2")
+        S[roi3] = S[roi3] + epics_get(pv)
+     
+    # using image_count routine  
+    } else if ( EPICS_COUNT == 4 ) {
+        S[iroi] = 0
+        S[iroi] = epics_get(PILATUS_ROI_PV)
+  
+    # using xrf_med count routine
+    } else if (EPICS_COUNT == 5) {
+         S[roi1] = 0; S[roi2] = 0; S[roi3] = 0;
+         for(j=0;j<XRF_NUM_DET;j++ ){
+            #print "get roi"
+            if( XRF_BAD_DETS[j] != 1 ){
+               pv = sprintf("%smca%d.%s",XRF_MED_PV,j+1,"R0")
+               S[roi1] = S[roi1] + epics_get(pv)
+
+               pv = sprintf("%smca%d.%s",XRF_MED_PV,j+1,"R1")
+               S[roi2] = S[roi2] + epics_get(pv)
+
+               pv = sprintf("%smca%d.%s",XRF_MED_PV,j+1,"R2")
+               S[roi3] = S[roi3] + epics_get(pv)
+            }
+         }
+    }
 
 }'
 
 ###########################################################################
 
 
+###########################################################################
+# replace ct from SPECD/standard.mac  
+# this allows us to do custom couting using
+# epics detectors etc...  
+############################################################################
+def ct '{
+    
+     # if using bench shutter open it before count
+     if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+     # use med count routine
+     if (EPICS_COUNT == 2 ){
+	  waitmove        
+	  epics_med_count $*
+          show_cnts
+
+     # use xrf count routine
+     } else if (EPICS_COUNT == 3 ){
+        #XRF_WRITE_FILES = FALSE
+	  waitmove
+        epics_xrf_count $*
+          show_cnts
+
+     # use image count routine
+     } else if (EPICS_COUNT == 4 ){
+        #print "trigger pilatus"
+	  waitmove
+        epics_pilatus_count $*
+        show_cnts
+     
+     # use xrf count routine
+     } else if(EPICS_COUNT == 5 ){
+        #XRF_WRITE_FILES = FALSE
+	  waitmove
+        epics_xrf_med_count $*
+        show_cnts
+
+     # Default use standard spec count method 
+     } else {
+        cdef("cleanup_once", "onp; show_cnts; offp; user_ct", "ct")
+        waitmove
+        count_em $*
+        waitcount
+        cdef("cleanup_once", "", "ct", "delete")
+        onp; show_cnts; offp
+        user_ct
+     }
+
+     # if using bench shutter close it after count
+     if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
+}'
+
 #########################################################################
 # The loop macro, called by all the scans at each iteration
+# added XRF_COUNT condition
 def _loop '{
 	local z,i,n
 
       # if its a point scan we need to get the counts
       # traj scans already has the counts so we can skip this
+      # note if using bench shutter it gets toggled in traj_execute
       if (IS_TRAJ_SCAN == 0) {
 	    if (!set_sim(-1) && _sleep) {
               do_sleep _sleep
 	    }
-          # if its a fake scan get the fake vals
+
+          # if its a fake scan get the fake scan vals
           if (IS_FAKE_SCAN == 1){
              fake_scan_count _ctime
-          }else if(IS_EPICS_MED_COUNT){
+
+          # use med count routine
+          }else if(EPICS_COUNT == 2){
+             # if using bench shutter open it before count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+             # do the count
              epics_med_count _ctime
+
+             # if using bench shutter close it after count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+		
+          # use xrf count routine
+	    }else if(EPICS_COUNT == 3){
+             # if using bench shutter open it before count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+             # do the count
+             epics_xrf_count _ctime
+
+             # if using bench shutter close it after count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
+          # use image count routine
+	    }else if(EPICS_COUNT == 4){
+             # if using bench shutter open it before count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+             # do the count
+             epics_pilatus_count _ctime
+
+             # if using bench shutter close it after count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
+	  # use xrf med count routine
+	    }else if(EPICS_COUNT == 5){
+             # if using bench shutter open it before count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+             # do the count
+             epics_xrf_med_count _ctime
+
+             # if using bench shutter close it after count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
+          # Default use standard spec count method 
           } else {
- 	       measure0
+
+             measure0
+
+             # if using bench shutter open it before count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
+
+             # do the count
              scan_count _ctime
-	       measure1
-	       measure2
+
+             # if using bench shutter close it after count
+             if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
+
+             measure1
+             measure2
+
           }
       }
 
@@ -665,7 +602,8 @@ def _loop '{
 
 	printf("%s%s\n",s,Pout)
 
-	ifp {
+	ifp 
+      {
 		fprintf(PRINTER,"%3d %s %8.6g ", NPTS,_hkl_val11,S[sec])
 		if (MON >= 0)
 			fprintf(PRINTER,"%8.0f ", S[MON])
@@ -686,7 +624,7 @@ def _loop '{
 			fprintf(DATAFILE," %g",S[z])
 		fprintf(DATAFILE," %g\n",S[DET]);
 	}
-        user_scan_loop
+      user_scan_loop
 }'
 #########################################################################
 
@@ -702,6 +640,7 @@ def Fheader  '_cols = _cols+2;
               if(IS_ROD_SCAN) printf("%s\n", RS_SCAN_TITLE);
               printf("#ATTEN %d %d %d %d\n", ATTEN[0], ATTEN[1], ATTEN[2], ATTEN[3] );
               printf("#ALP_BET %g %g\n", ALPHA, BETA);
+              printf("#ENERGY %g\n", 12398.4244/LAMBDA);
              '
 ###
 ###  Hack 3-20-03, T2
@@ -791,12 +730,14 @@ def _head '
 			printf("  %s",cnt_name(z))
 		printf("  %s\n",cnt_name(DET))
 		offd; ont
-	} else
+	} else {
 		SCAN_N++
+      }
 	T_L = sprintf("Scan %d", SCAN_N)
 
 	# PRINTER HEADER
-	ifp {
+      ifp 
+      {
 		local i, j, k, s
 		onp; offt
 		printf("\n")
@@ -954,6 +895,21 @@ def lup2 '
   }
 
 '
+############################################################################
+############################################################################
+# round a floating number
+#
+def round(x) '{
+        if ((x - int(x)) < .5) {
+           x = int(x) 
+        } else {
+          x = int(x) + 1
+        }
+	  return(x)  
+     
+  
+
+}'
 ############################################################################
 
 ############################################################################
