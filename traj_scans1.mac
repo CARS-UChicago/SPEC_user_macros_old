@@ -779,41 +779,22 @@ def traj_build '{
      # We use the "wait" argument to epics_put so it uses ca_put_callback,
      # and we are sure things are accepted before we start counting
      
-     if (PILATUS_WRITE_FILES){  
-         dstr = split(DATAFILE,splt_dstr,".")
-         # Warning the path below cab over flowed the pilatus path string buffer if string longer than 156
-         # PJE is including it now as a test.  Need to look into making string buffer larger
-         # PJE 2/22/08
-         _img_path = sprintf("%s/%s/S%.3d",PILATUS_IMAGE_DIR,splt_dstr[0],SCAN_N)
-         # p _img_path
-         array _temp[256]
-         _temp = _img_path
-         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
-         img_fname = sprintf("%s_S%.3d",DATAFILE,SCAN_N)
-         _fileformat = "%s%s_%.3d.tif"
-         # print img_fname
-     } else {
-         array _temp[256]
-         _temp = PILATUS_IMAGE_DIR 
-         epics_put(PILATUS_IMGPATH_PV,_temp, 1)
-         img_fname = "000test"
-         _fileformat = "%s%s.tif"
-         #print img_fname
-     }
-
-     epics_put(PILATUS_FNAME_PV,img_fname,1)
-     epics_put(PILATUS_FILENUMBER_PV,0,1)
-     epics_put(PILATUS_FILEFORMAT_PV,_fileformat,1)
-     epics_put(PILATUS_NFRAME_PV, $2, 1)
+     # Call macro that creates and set the Pilatus path and filename
+     img_full_filename
      
+     # Setup exposure time, collection mode and number of frames
+     epics_put(PILATUS_FILENUMBER_PV,0,1)
+     epics_put(PILATUS_NFRAME_PV, $2, 1)
+
+     # We use the Ext Enable mode on IDC together with the pulse generator
+     # On BMC we use Multi Trigger mode - no need for pulse generator
+     # When we upgrade IDC to XPS we will be able to use the same mode as BMC
      if (SPEC == "psic_idc"){
-#        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Triger
-#       epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
         epics_put(PILATUS_ACQMODE_PV,1,1)  # Ext Enable
      }
      else
      {
-        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Triger
+        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Trigger
         epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
      }	  
 
@@ -822,6 +803,11 @@ def traj_build '{
      # Wait for Pilatus to be armed before moving on. PJE 1/23/08
      while (epics_get(PILATUS_ARMED_PV) == "Unarmed") sleep(0.1)
 
+     # Set the number of points in Pilatus ROI MCA so it will stop
+     epics_put(PILATUS_ROI_ARRAY_NUSE_PV, $2)
+     # Start the Pilatus Roi MCA
+     epics_put(PILATUS_ROI_ARRAY_START_PV,1)
+     while (epics_get(PILATUS_ROI_ARRAY_ACQ_PV) == "Done") sleep(0.1)
    }
 }'
 
@@ -854,7 +840,7 @@ def traj_exec '{
        if (EPICS_COUNT == 4){
            print "  Abort Pilatus"
            print "Aborting Pilatus waiting 40 sec for timeout."
-           epics_put(PILATUS_ABORT_PV,1)
+           epics_put(PILATUS_ABORT_PV,0)
 
            # This sleep is a bit of a klug since we do not have any way
            # telling when the pilatus is ready again.  I measured it a 33 sec
@@ -883,10 +869,10 @@ def traj_read_counts '{
     _pv = TRAJ_MCS_PREFIX "Acquiring"
     while (epics_get(_pv) != "Done") sleep(0.1)
 
-    # Wait for Pilatus to be done acquiring. 
+    # Wait for Pilatus ROI MCA to be done. 
     # Use this for img_on case 
     if (EPICS_COUNT == 4) {
-        while (epics_get(PILATUS_ACQ_PV) != "Done") sleep(0.1)
+        while (epics_get(PILATUS_ROI_ARRAY_ACQ_PV) != "Done") sleep(0.1)
      }
     
     # add this to wait for readback since we need to check the number of points
@@ -995,7 +981,7 @@ TRAJ_MCS_NAME[4]    = TRAJ_MCS_PREFIX "mca5"
 TRAJ_MCS_NAME[5]    = TRAJ_MCS_PREFIX "mca6"
 TRAJ_MCS_NAME[6]    = TRAJ_MCS_PREFIX "mca7"
 TRAJ_MCS_NAME[7]    = TRAJ_MCS_PREFIX "mca8"
-TRAJ_MCS_NAME[8]    = PILATUS_PREFIX "ROI1WFNetCounts"
+TRAJ_MCS_NAME[8]    = PILATUS_ROI_ARRAY_PV
 MAX_TRAJ_MOTORS     = 8
 MAX_TRAJ_INDEX      = 9
 MAX_TRAJ_MCS        = 8

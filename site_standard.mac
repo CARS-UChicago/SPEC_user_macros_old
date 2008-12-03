@@ -109,7 +109,7 @@ def gse_cleanup '{
 
     if (EPICS_COUNT == 4){
         print "  Abort Pilatus"
-        epics_put(PILATUS_ABORT_PV,1)
+        epics_put(PILATUS_ABORT_PV,0)
     }
        
 
