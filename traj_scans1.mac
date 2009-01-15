@@ -807,6 +807,7 @@ def traj_build '{
      epics_put(PILATUS_ROI_ARRAY_NUSE_PV, $2)
      # Start the Pilatus Roi MCA
      epics_put(PILATUS_ROI_ARRAY_START_PV,1)
+     
      while (epics_get(PILATUS_ROI_ARRAY_ACQ_PV) == "Done") sleep(0.1)
    }
 }'

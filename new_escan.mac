@@ -1,0 +1,109 @@
+# Escan - Scans energy.
+# Replace the Escan in standard.mac.
+#
+# Added the option to operate at a fixed critical angle of incidence 
+# (or scattering Q) during an energy scan by calculate a new mu value.
+#  This is used during grazing incidence EXAFS.   PJE - 12-19-08
+ 
+def Escan '
+      #p "$5" ("$5" == "fixQ" || "$5" == "fixAC")
+	if ($# != 4 && $# != 5 || $# == 5 && !("$5" == "fixQ" || "$5" == "fixAC")) {
+		eprint "\
+Usage: Escan start finish intervals time [fixQ or fixAC]\n\
+       (Units are KeV)\n\
+       (the literal \"fixQ\" means keep HKL constant and the literal \"fixAC\" means keep the critical angle fixed)"
+		exit
+	} 
+
+	{ _s1 = $1; _f1 = $2; _n1 = int($3); _ctime = $4; }
+
+	if (_n1 <= 0) {
+		eprint "Number of Intervals <= 0"
+		exit
+	} 
+	if (_s1 <= 0 || _f1 <= 0) {
+		eprint "Can only deal with positive energies."
+		exit
+	}
+
+	_bad_lim = 0
+	_chk_mlim _s1
+	_chk_mlim _f1
+	if (_bad_lim) exit
+
+	HEADING = sprintf("Escan %g %g %g %g%s",$1,$2,$3,$4,$#>4?" $5":"")
+	_d1 = (_f1 - _s1) / _n1++
+	X_L = "Energy (keV)"
+	Y_L = cnt_name(DET)
+	_sx = _s1; _fx = _f1
+
+	FPRNT=sprintf("Energy  %s  %s  %s  ",motor_name(Mono), motor_name(mu), motor_name(nu))
+	PPRNT=sprintf("%9.9s %9.9s %9.9s %9.9s ", "Energy", motor_name(Mono), motor_name(mu), motor_name(nu))
+	_stype = 1|(1<<8)
+	_cols=4
+	if (mono_type == 2) {
+		FPRNT=sprintf("%s%s  ",FPRNT,motor_name(mon_y))
+		PPRNT=sprintf("%s%9.9s ",PPRNT,motor_name(mon_y))
+		_stype = 1|(2<<8)
+		_cols=3
+	}
+	if (mono_type == 3 || mono_type == 4) {
+		FPRNT=sprintf("%s%s  %s  ",FPRNT,\
+		  motor_name(montrav),motor_name(mond))
+		PPRNT=sprintf("%s%9.9s %9.9s ",PPRNT,\
+		  motor_name(montrav),motor_name(mond))
+		_stype = 1|(3<<8)
+		_cols=4
+	}
+	VPRNT=PPRNT
+
+	scan_head
+	def _scan_on \'
+	 {
+	   local h_ca k_ca l_ca
+         local alpha_c
+	   if ("$5" == "fixQ") {
+		h_ca = H
+		k_ca = K
+		l_ca = L
+	   }
+	   if ("$5" == "fixAC") {
+            alpha_c = A[mu]
+	   }
+	   for (; NPTS < _n1; NPTS++) {
+		local   E
+		get_angles
+		E = _s1 + NPTS * _d1
+		calcM E; calcE
+		if ("$5" == "fixQ") {
+			H = h_ca
+			K = k_ca
+			L = l_ca
+			calcA
+		}
+		if ("$5" == "fixAC") {
+                A[mu] = alpha_c * (_s1/E)
+                A[nu] = A[mu] * 2.
+		}
+		scan_move
+		calcE; E = hc_over_e / LAMBDA
+		FPRNT=sprintf("%g %.8g %.8g %.8g ",E,A[Mono],A[mu], A[nu])
+		PPRNT=sprintf("%9.4f %9.4f %9.4f %9.4f ",E, A[Mono],A[mu], A[nu])
+		if (mono_type == 2) {
+		    FPRNT=sprintf("%s%.8g ",FPRNT,A[mon_y])
+		    PPRNT=sprintf("%s%9.4f ",PPRNT,A[mon_y])
+		}
+		if (mono_type == 3 || mono_type == 4) {
+		    FPRNT=sprintf("%s%.8g %.8g ",FPRNT,A[montrav],A[mond])
+		    PPRNT=sprintf("%s%9.4f %9.4f ",PPRNT,A[montrav],A[mond])
+		}
+		VPRNT=PPRNT
+		scan_loop
+		scan_data(NPTS, E)
+		scan_plot
+	   }
+	 }
+	 scan_tail
+	\'
+	_scan_on
+'

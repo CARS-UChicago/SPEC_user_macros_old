@@ -1,0 +1,87 @@
+############################################################################
+## IDC fast feedback check and correction Dec 2009 PJE
+## Used as before a starting a scan to correct the Mono DAC driven PZTs
+############################################################################
+
+# globals
+global DAC_CENTER
+global DAC_DEAD_BAND
+
+if( unset("DAC_CENTER")) DAC_CENTER = 2047
+if( unset("DAC_DEAD_BAND")) DAC_DEAD_BAND = 150
+
+############################################################################
+def check_feedback '{
+ 
+     
+     # Values for pitch feedback
+     mono_pitch_corr_dir = -1. # Use -1 to reverse the correction direction
+     mono_pitch_corr_step = .001
+     mono_pitch_dac_pv = "13IDA:fast_pitch_pid.OVAL"
+     mono_pitch_motor_pv = "13IDA:m12" 
+     mono_pitch_feedback_on_pv = "13IDA:fast_pitch_pid.FBON"
+
+     # Values for roll feedback
+     mono_roll_corr_dir = 1. # Use -1 to reverse the correction direction
+     mono_roll_corr_step = .001
+     mono_roll_dac_pv = "13IDA:fast_roll_pid.OVAL"
+     mono_roll_motor_pv = "13IDA:m11" 
+     mono_roll_feedback_on_pv = "13IDA:fast_roll_pid.FBON"
+
+
+     # The 13IDA Shutter PV     
+     shutter_pv = "13IDA:eps_mbbi4"
+
+     
+     # First correct the pitch feedback
+     print "************* Checking Mono Pitch Feedback ************* "
+     _correct_dac mono_pitch_corr_dir mono_pitch_corr_step mono_pitch_dac_pv mono_pitch_motor_pv mono_pitch_feedback_on_pv shutter_pv 
+     
+     # Then correct the roll feedback
+     print "************* Checking Mono Roll Feedback ************* "
+     _correct_dac mono_roll_corr_dir mono_roll_corr_step mono_roll_dac_pv mono_roll_motor_pv mono_roll_feedback_on_pv shutter_pv 
+}'
+
+############################################################################
+def _correct_dac '{
+     
+     _corr_dir = $1
+     _corr_step = $2
+     _dac_pv = $3
+     _motor_pv = $4
+     _feedback_on_pv = $5
+     _shutter_pv = $6
+
+     shutter_status = epics_get(_shutter_pv)
+     _feedback_on = epics_get(_feedback_on_pv)
+
+     if((_feedback_on == "On") && (shutter_status == "Open")){
+       _dac = epics_get(_dac_pv)
+       print "DAC = " _dac
+       dac_error_dir = 1
+       corr_steps = 1
+
+       while (fabs(_dac - DAC_CENTER) > DAC_DEAD_BAND){
+         print corr_steps " DAC is out of dead-band.  Correcting in progress"   
+         
+         _val = epics_get(_motor_pv)
+         print "Motor = " _val
+
+         if((_dac - DAC_CENTER)<= 0.)dac_error_dir = -1.
+         _val -= (_corr_dir * _corr_step * dac_error_dir)
+         print "Corrected val = " _val        
+         epics_put(_motor_pv,_val)
+         sleep(.4)
+         _dac = epics_get(_dac_pv)
+         corr_steps++
+         if(corr_steps > 20){
+           print "Correction step limit reached. Stop correcting"
+           break
+         }
+       }
+     print "Feedback is centered"
+     }
+     else{
+       print "Shutter is closed or feedback is off"
+     }
+}'
