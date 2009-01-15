@@ -316,7 +316,11 @@ def img_full_filename '{
          _img_path= PILATUS_IMAGE_DIR 
          img_fname = "000test"
          _fileformat = "%s%s.tif"
-         #print img_fname
+         # Delete old files before writing new ones to avoid pilatus reusing old files
+         _fullname = CWD "/images/" img_fname "*.tif"
+         _cmd = "rm " _fullname
+         unix(_cmd)
+         #print fullname
      }
 
      # write to data base fields
