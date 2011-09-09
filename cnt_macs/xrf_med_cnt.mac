@@ -40,7 +40,9 @@ def _setup_xrf_med '{
     # like /home/idc_user/cars5/Data/gpd_user/2007/March/XSW/SANJIT
 
     CURRENT_DIR = CWD
-    dstr = split(CURRENT_DIR,splt_dstr,"/gpd_user/")
+    #dstr = split(CURRENT_DIR,splt_dstr,"/gpd_user/")
+    # Need to be explisit since we now have two gpd_user in the path
+    dstr = split(CURRENT_DIR,splt_dstr,"/Data/gpd_user/")
     XRF_DATA_DIR = sprintf("/cars5/Data/gpd_user/%s",splt_dstr[1])
     printf("HOST DATA DIRECTORY = %s/xrf_files\n",XRF_DATA_DIR)
 
@@ -108,6 +110,7 @@ def epics_xrf_med_count '{
      xrf_prtm_pv = sprintf("%s%s",xrf_med_pv,"PresetReal")
      xrf_cnt_pv  = sprintf("%s%s",xrf_med_pv,"EraseStart")
      xrf_acq_pv  = sprintf("%s%s",xrf_med_pv,"Acquiring")
+     xrf_premode_pv = sprintf("%s%s",xrf_med_pv,"PresetMode")
      
      # Put the write file  information to different DATA fields
      # For the host(/cars5/Data), folder(/gpd_user/2007/test/subdir)
@@ -175,13 +178,15 @@ def epics_xrf_med_count '{
      # put the count times
      epics_put(sc_prtm_pv,cnt_time_val)
      epics_put(xrf_prtm_pv,cnt_time_val) 
+     epics_put(xrf_premode_pv,"Real time")
 
      # user pre count stuff
      user_precount
 
      # hit the triggers
      xx_cnt = 0
-     epics_put(xrf_cnt_pv,1)
+
+     epics_put(xrf_cnt_pv,"Erase")
      while( epics_get(xrf_acq_pv,"short") == 0){
          sleep(0.05);
          xx_cnt = xx_cnt + 1;         
