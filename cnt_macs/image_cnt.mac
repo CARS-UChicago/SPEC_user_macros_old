@@ -71,7 +71,7 @@ def _setup_img '{
      if ( PILATUS_ROI_PREFIX == "") PILATUS_DET_PREFIX = "ROI1:"
      PILATUS_ROI_PREFIX = getsval("Enter PILATUS ROI plugin name i.e. ROI1:",PILATUS_ROI_PREFIX)
      
-     if (PILATUS_MOUNT == "") PILATUS_MOUNT = "cars5/Data"
+     if (PILATUS_MOUNT == "") PILATUS_MOUNT = "/home/det/cars5/Data"
      PILATUS_MOUNT = getsval("Enter mount point relative to camserver home directory",PILATUS_MOUNT)
      if (PILATUS_SPEC_MOUNT == "") PILATUS_SPEC_MOUNT = "cars5/Data"
      PILATUS_SPEC_MOUNT = getsval("Enter mount point relative to spec home directory",PILATUS_SPEC_MOUNT) 
@@ -132,7 +132,7 @@ def _setup_img '{
      # Here we build the Pilatus file director.  It is broken up into a 
      # Pilatus mount point so that it is easy to change the disk that 
      # the data is saving to while preserving the directory structure 
-     # of the spec file location on that disk.  For example we can us 
+     # of the spec file location on that disk.  For example we can use 
      # the local disk on the computer controlling the Pilatus and build 
      # a data tree  that matches the one on cars5.
      
