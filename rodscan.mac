@@ -1,0 +1,976 @@
+#+
+#==============================================================================
+# Macroname: rodscan.mac 
+#            ===========
+#
+# SVN-Info:
+# ---------
+#
+# $Date$
+# $Author$
+# $URL: file:///data/svn/software/spec/trunk/common/rodscan.mac $
+# $Revision$
+#
+# Description:  SPEC macro to perform scans along a crystal truncation rod,
+# ------------  i.e. along the L-direction. It provides enhanced features com-
+#               pared to the standard "lscan" in SPEC:
+#                 * skip Bragg points in the scan
+#                 * increase the sampling density around Bragg points
+#                 * variable scaling of the count times based on a generic
+#                   intensity profile of a truncation rod.
+#               The behaviour can be controlled via a number of parameters
+#               which can be configured in a setup dialog or directly via
+#               global variables.
+#               The scan is programmed such that it will ignore any scan points
+#               resulting in unreachable hkl-values or limit violations for any
+#               of the motors. If no valid scan points are found at all, the
+#               scan will be aborted "softly", meaning that no error exception
+#               is raised and any macro using "rodscan" will continue to run. 
+#
+# Note:         This macro functionality is entirely based on the "rod_scan"
+# -----		macro developed by Tom Trainor and coworkers at the GSECARS
+#               beamlines at Sector 13 of the Advanced Photon Source. The
+#               original version is modified here to use single open slit
+#               exposures in the stationary mode instead of rocking scans. As a
+#               result, only one scan along L is executed, rather than a series
+#               of rocking scans for each L-value. Consequently, "rodscan"
+#               needs to adapt some of the SPEC standard scan behavior (like
+#               calling scan_head), and is therefore more of a modification a
+#               standard "lscan", adding to it the specific features developed
+#               at Sector 13.
+#
+# Author(s):            C. M. Schlepuetz (CS)
+# Co-author(s):         
+# Address:              University of Michigan
+#                       Department of Physics
+#                       450 Church Street
+#                       Ann Arbor, MI, 48109-1040
+#                       United States
+# Contact:              cschlep@umich.edu
+# Created:              2010/03/15
+#
+#-
+#
+# Chained macro definitions affected by this macro:
+# -------------------------------------------------
+#
+# Change Log:
+# -----------
+#
+# 2010/03/15 (CS):
+# - created first version of this macro.
+# - tested on a dummy SPEC version not connected to a diffractometer.
+#
+# 2010/03/25 (CS):
+# - tested on the BMC line at Sector 13, APS by P. Eng (seems to work)
+# 
+# 2010/03/26 (CS):
+# - implemented the scaling of exposure times
+# - tested on dummy SPEC version not connected to a diffractometer
+#
+# 2010/03/31 (CS):
+# - added global variable RS_CNT_PREC to control the precision of automatically
+#   scaled count time values (count times will be rounded to this precision)
+#
+# 2010/04/06 (CS):
+# - removed RS_MAX_CNT and use user-requested count time as maximum count time
+#   instead.
+# - rodscan now saves motor mnemoics to the SPEC file rather than motor names
+#   (THIS IS NOT THE STANDARD BEHAVIOR FOR SPEC! REQUESTED BY APS, SECTOR 13).
+# - Introduced a TEST MODE for rodscan, which will just print scan information
+#   without actually performing the scan.
+# - global variable RS_CNT_TOTAL is incremented by the total scan time of
+#   the current scan. To be used in long scan macros to determine the total
+#   scan time.
+#
+# 2010/07/16 (CS):
+# - fixed bug in _rodscan_parse which caused _max_pts to be too small.
+# - fixed a bug which could cause the scan to take points past the specified
+#   end point if those were inside the denser sampling region.
+#
+# 2010/07/23 (CS):
+# - added SVN keywords (replacing CVS keywords)
+#
+# 2010/09/09 (CS):
+# - added an alternative input method to specify the locations of the Bragg
+#   peaks in the form of a list rather than a Bragg position and increments.
+#   The list needs to be passed as a single string of space-delimited integers.
+#   Unfortunately, this method makes the code more complicated and harder to
+#   read, especially due to the very limited array handling capabilities of
+#   SPEC.
+# - Added RS_SMALL global variable which needs to be used in many comparative
+#   statements to avoid small precision errors producing false expressions.
+# - Added following internal macros:
+#   * _rs_closest_brg
+#   * _rs_calc_dl
+#   * _rs_lo_brg_ind
+#   * _rs_hi_brg_ind
+#   * round # (only if not already defined)
+#   * floor # (only if not already defined)
+#   * ceil  # (only if not already defined)
+#
+# 2010/12/15 (CS):
+# - added global variable RS_PNT_TOTAL which sums up the total number of scan
+#   points (in the same manner as RS_CNT_TOTAL sums up all count times).
+# - added option to include a fixed dead time between exposures in the total
+#   scan time prediction. New global variable: RS_PNT_DEADTIME
+# - added \'_rs_sec2timestr\' to generate easily readable time strings.
+#
+#2011/06/10 (PJE/JES):
+# - fixed bug that prevented usage error message from printing if rodscan not followed by
+#   appropriate number of arguments (need escapes around " marks around <Bragg List>)
+# - fixed bug that caused truncation of non-integer L_Bragg values
+#
+# To Do:
+# ------
+#
+# APS, Sector 13 requests:
+# - print ALPHA, BETA to SPEC file and screen during scan
+#   (this should be controlled in the startup script by adding the correspon-
+#    ding output to FPRNT, VPRNT, etc. Not all SPEC geometries have ALPHA and
+#    BETA defined by default, or they may be named differently)
+# - reject points with BETA < 0 (same problem as above)
+# - plot scaled count times as function of l in TEST MODE
+#
+#==============================================================================
+
+#==============================================================================
+# Define some global variables
+# ----------------------------
+
+# Save the name of this macro file (Used for the help function)
+global RODSCAN_MAC
+       RODSCAN_MAC = DOFILE;
+
+# control level of debugging messages
+global RS_DEBUG
+       RS_DEBUG = 0
+
+# upper and lower intensity limits for the scaling of count times
+# these values are usually good, so they are not included in the rodscan_setup
+# routine. Change the global variable values directly if you need to.
+global RS_SCALE_I_MIN
+       RS_SCALE_I_MIN = 1.1
+global RS_SCALE_I_MAX
+       RS_SCALE_I_MAX = 200
+
+# define a small value used to relax the precision or comparative statements.
+global RS_SMALL
+       RS_SMALL = 1e-10
+
+#-----------------------------------------------------------
+# these should be set by the caller by using "rodscan_setup"
+
+# number of scan points in rodscan (is determined dynamically, see below)
+global RS_NPTS
+       RS_NPTS = 0;
+# Sets up limit on how close to bragg peak one can go
+global RS_BRG_EXCL_RNG
+       RS_BRG_EXCL_RNG = 0.02;
+
+# Define region near Bragg peak that may have higher point density
+global RS_BRG_DENS_RNG
+       RS_BRG_DENS_RNG = 0.2;
+
+# Increases point density near bragg peak region by specified factor
+global RS_BRG_DENS_FAC                                                    
+       RS_BRG_DENS_FAC = 2;                                            
+
+# scale the count time based on distance from Bragg peaks
+# Here $I = \sin^2(\Delta l)$
+global RS_SCALE_SEC
+       RS_SCALE_SEC = 0;
+     # RS_SCALE_SEC = 0; # just use max_cnt time for all
+     # RS_SCALE_SEC = 1; # use sqrt(1/I)
+     # RS_SCALE_SEC = 2; # use 1/I
+
+# minimum count time
+global RS_MIN_CNT
+       RS_MIN_CNT = 0.2;
+
+# rounding precision of count times
+# if RS_CNT_PREC <0, count times will not be rounded
+global RS_CNT_PREC
+       RS_CNT_PREC = 0.01;
+
+# provide a simulation mode, which will just display some info
+global RS_TEST
+       RS_TEST = 0;
+
+# global which holds total scan time for the scan(s)
+global RS_CNT_TOTAL
+       RS_CNT_TOTAL = 0;
+
+# global which holds total number of scan points for the scan(s)
+global RS_PNT_TOTAL
+       RS_PNT_TOTAL = 0;
+
+# global which holds the average dead time (moving, waiting, etc) between
+# exposures
+global RS_PNT_DEADTIME
+       RS_PNT_DEADTIME = 0;
+
+
+#+
+#==============================================================================
+# This macro file contains the following commands:
+#-
+#
+#+
+#------------------------------------------------------------------------------
+# rodscanhelp        - generates this help text. This is obtained by
+#                      displaying the file rodscan.txt, which should sit in the
+#                      same directory as this macro file.
+#
+#-
+
+def rodscanHelp 'rodscanhelp'
+def rodscan_help 'rodscanhelp'
+
+def rodscanhelp '{
+#   ===========
+
+  unix (sprintf ("dirname %s", RODSCAN_MAC), _1)
+  ll = length (_1)
+  if (substr (_1, ll, 1) == "\n") _1 = substr (_1, 1, (ll - 1))
+  file = sprintf ("%s/rodscan.txt", _1)
+  if (file_info (file, "-e")) {
+    unix (sprintf ("cat %s", file))
+  } else {
+    printf("\n  Macros available in file rodscan.mac:\n")
+    printf(  "                           ===========\n")
+    printf("\n")
+    printf("     rodscanhelp      - creates this help text\n")
+    printf("     rodscan_setup    - interactive setup dialog for rodscan\n")
+    printf("                        parameters\n")
+    printf("     rodscan_show     - display the current rodscan parameters\n")
+    printf("     rodscan          - perform a rodscan\n")
+  }
+}'
+
+
+#+
+#------------------------------------------------------------------------------
+# rodscan_setup      - setup the parameters for a rodscan, such as the L-range
+#                      around Bragg points to skip, the range of higher density
+#                      sampling around Bragg peaks, the count time scaling,
+#                      etc.
+#		       These parameters can also be controled via the corres-
+#                      ponding global variables, whose names are displayed
+#                      during this setup routine, to facilitate scripting of
+#                      large sets of rodscan measurements.
+#
+#   Usage: rodscan_setup    # then anwer the questions
+#		       
+#-
+
+def rodscan_setup '{
+#   =============
+
+    local _inp, _invalid
+
+    # L-range around Bragg peaks to exclude
+    print ""
+    print "Specify the L-range around Bragg peaks to be skipped in a scan."
+    print "(symmetric around peak, measured in r.l.u.)"
+    RS_BRG_EXCL_RNG = getval("Excluded range?",RS_BRG_EXCL_RNG)
+
+    # L-range with increased sampling around Bragg peaks
+    print ""
+    print "Specify the L-range around Bragg peaks where sampling density"
+    print "is increased."
+    print "(symmetric around peak, measured in r.l.u.)"
+    RS_BRG_DENS_RNG = getval("Increased sampling range?",RS_BRG_DENS_RNG)
+
+    # factor to increase sampling
+    print ""
+    print "Specify by what factor the sampling density around Bragg peaks"
+    print "should be increased. A factor of 1 will keep sampling density"
+    print "as it is."
+    print "(must be an integer and > 0)"
+
+    _invalid = 1
+    while(_invalid){
+        _inp = getval("Increased sampling range?",RS_BRG_DENS_FAC)
+        if ((_inp == int(_inp)) && (_inp > 0)){
+            RS_BRG_DENS_FAC = _inp
+            _invalid = 0
+        } else {
+            print "Error: Invalid scale factor. Must be an integer and > 0."
+            print "Try again..."
+        }
+    }
+
+    # count time scaling
+    print ""
+    print "Count time scaling based on theoretical rod intensities:"
+    print "  0 - do not scale count times"
+    print "  1 - use sqrt(1/I) scaling"
+    print "  2 - use (1/I) scaling"
+
+    _invalid = 1
+    while(_invalid){
+        _inp = getval("Scaling mode to use?",RS_SCALE_SEC)
+        if ((_inp == int(_inp)) && (_inp >=0) && (_inp < 3)) {
+            RS_SCALE_SEC = _inp
+            _invalid = 0
+        } else {
+            print "Error: Invalid scaling mode. Mode can be 1, 2, or 3. "
+            print "Try again..."
+        }
+    }
+
+    if (RS_SCALE_SEC > 0){
+        # count times
+        print ""    
+        RS_MIN_CNT = getval("Minimum count time (RS_MIN_CNT) [s]?",RS_MIN_CNT)
+        print ""    
+        print "Count times can be rounded to a given precision when automatic"
+        print "count time scaling is active. Use a value < 0 to disable"
+        print "rounding."
+        RS_CNT_PREC = getval("Count time precision (RS_CNT_PREC)",RS_CNT_PREC)
+    }
+
+    print "You can run rodscan in TEST MODE, which will display some info"
+    print "about the scan without actually taking the measurement."
+    RS_TEST = yesno("Do you want to enable TEST MODE",0)
+
+    print "Average dead time between exposures, due to moving, syncing, etc."
+    print "(used to calculate total scan time)"
+    RS_PNT_DEADTIME = getval("Dead time [s] (RS_PNT_DEADTIME)",RS_PNT_DEADTIME)
+
+    rodscan_show
+
+}'
+
+
+#+
+#------------------------------------------------------------------------------
+# rodscan_show       - display the current rodscan parameters.
+#
+#   Usage: rodscan_show
+#  
+#-
+
+def rodscan_show '{
+#   ============
+
+    print ""
+    print "Control parameters for \'rodscan\':"
+    print ""
+
+    printf("Excluded range around Bragg peaks (RS_BRG_EXCL_RNG): %g\n",\
+            RS_BRG_EXCL_RNG)
+    printf("Higher sampling density range around Bragg peaks ")
+    printf("(RS_BRG_DENS_RNG): %g\n", RS_BRG_DENS_RNG)
+    printf("High density sampling factor (RS_BRG_DENS_FAC): %d\n",\
+            RS_BRG_DENS_FAC)
+    printf("Intensity scaling (RS_SCALE_SEC): ")
+    if (RS_SCALE_SEC==0){
+        printf("0 - no scaling\n")
+    } else if (RS_SCALE_SEC==1){
+        printf("1 - sqrt(1/I)\n")
+    } else if (RS_SCALE_SEC==1){
+        printf("2 - (1/I)\n")
+    }
+    printf("Minimum count time [s] (RS_MIN_CNT): %g\n", RS_MIN_CNT)
+    printf("Count time rounding precision [s] (RS_CNT_PREC): %g\n", \
+            RS_CNT_PREC)
+    printf("Dead time between exposures [s] (RS_PNT_DEADTIME): %g\n",\
+            RS_PNT_DEADTIME)
+
+    printf("Rodscan simulation mode is ")
+    if (RS_TEST){
+        printf("ON.\n")
+    } else {
+        printf("OFF.\n")
+    }
+}'
+
+
+#+
+#------------------------------------------------------------------------------
+# rodscan            - performs a scan along the L-direction for a given
+#		       position in H and K. It is similar to 'lscan', but
+# 		       provides additional features, such as scaling of the
+#                      count times according to the l-position, skipping of the
+#                      Bragg points and increasing the sampling density around
+#                      Bragg points.
+#
+#   Usage: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time>
+#
+#                      The HKL-rod is scanned from L=<L_start> to L=<L_end> in
+#                      steps of size <del_L> with count time <count_time>.
+#                      Bragg points are at all integer L-positions.
+#
+#      or: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time> \
+#                 "<Bragg_List>"
+#
+#                      Bragg points are located at all l-values specified in
+#                      <Bragg_List>, which must be a single string argument
+#                      with a whitespace delimited list of the Bragg positions.
+#                      The next Bragg peak positions outside the scan range
+#                      should also be listed in order to guarantee correct
+#                      spacing and count time scaling.
+#
+#      or: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time> \
+#                  <L_Bragg> <dL_Bragg> 
+#
+#                      Bragg points are at all L-positions given by
+#                          L = <L_Bragg> + N*<dl_Bragg>,
+#                      where N is any integer (also negative).
+#
+#   Examples: rodscan 3 2 0.2 4.5 0.05 1 1 3
+#                      (32L)-rod from 0.2 to 4.5 in steps of 0.05 counting 1 s
+#                      Bragg peaks at 1 and 4
+#
+#             rodscan 1 2 0.2 5.5 0.01 0.1 "0 1 3 4 6"
+#                      (12L)-rod from 0.2 to 4.5 in steps of 0.01 counting 0.1s
+#                      with Bragg peaks at L=0,1,3,4,6.
+#-
+ 
+def rodscan '{
+#   =======
+
+    local h_val, k_val, l_st, l_en, dl, cnt_time, l_brg, dl_brg, brg_list
+    local _valid, _error, _nmin, _nmax, _ii
+
+    _error = 0
+    # check input arguments
+    if ($# == 8) {
+        h_val = $1
+        k_val = $2
+        l_st = $3
+        l_en = $4
+        dl = $5
+        cnt_time = $6
+        l_brg = $7
+        dl_brg = $8
+        brg_list = ""
+    } else if ($# == 7){
+        h_val = $1
+        k_val = $2
+        l_st = $3
+        l_en = $4
+        dl = $5
+        cnt_time = $6
+        l_brg = 1
+        dl_brg = 1
+        brg_list = "$7"
+    } else if ($# == 6){
+        h_val = $1
+        k_val = $2
+        l_st = $3
+        l_en = $4
+        dl = $5
+        cnt_time = $6
+        l_brg = 1
+        dl_brg = 1
+        brg_list = ""
+    } else {
+        _error = 1
+    }
+
+    if (_error){
+       eprint "\
+Invalid input or wrong number of input arguments in \'rodscan\'\n\
+  Usage: rodscan H K L_start L_end del_L CountTime\n\
+     or: rodscan H K L_start L_end del_L CountTime \"<Bragg list>\"\n\
+     or: rodscan H K L_start L_end del_L CountTime L_Bragg dL_Bragg\n\
+  For more info about rodscan type \'rodscanhelp\'."
+        exit
+    }
+
+    # create Bragg peak list if given by the [L_Bragg, dL_Bragg] arguments
+    # this includes one Bragg peak below and above the scanned l-range
+    if (brg_list == ""){
+        _nmin = floor((l_st-l_brg)/dl_brg)
+        _nmax = ceil((l_en-l_brg)/dl_brg)
+        brg_list = ""
+        for(_ii=_nmin; _ii<=_nmax; _ii++){
+            brg_list = sprintf("%s%f ", brg_list, l_brg+_ii*dl_brg)
+        }
+    }
+    if(RS_DEBUG > 0){
+        printf("Bragg peak list: %s\n", brg_list)
+    }
+
+    # pass the input arguments to the parser to create the array of HKL-values
+    _valid = \
+        _rodscan_parse(h_val, k_val, l_st, l_en, dl, cnt_time, brg_list)
+
+    # stop here if in TEST MODE
+    if (RS_TEST){
+        # ask user to continue if in DEBUG MODE
+        if(RS_DEBUG){
+            getsval("Continue","")
+        }
+        return
+    }
+
+    # check if enough valid scan points
+    # if no valid scan points are found, try a "soft abort"
+    # this should abort rodscan without throwing an error event, so hopefully
+    # any running macros will continue by just skipping this scan.
+    if (!_valid) {
+        eprint ""
+        eprint "No valid scan points found. Aborting this scan..."
+        eprint ""
+        return(0)
+    }
+
+    l_st = array_op("min",RS_ARRAY[][2])
+    l_en = array_op("max",RS_ARRAY[][2])
+
+    HEADING = sprintf("rodscan %g %g  %g %g  %g %g  %g %g",\
+                       h_val, k_val, l_st, l_en, dl, cnt_time, l_brg, dl_brg)
+
+    _cols=3
+    if (_sav_geo_mot){
+            _cols += _numgeo
+    }
+
+    # plot labels
+    X_L = "L"
+    _sx = l_st
+    _fx = l_en
+    Y_L = cnt_name(DET)
+
+    # scan data
+    _stype = 2
+    _n1 = RS_NPTS
+
+    FPRNT="H  K  L  "
+    PPRNT=""
+    {
+     local i, s
+     for (i=0;i<_numgeo;i++) {
+         s = motor_mne(mA[i])
+         PPRNT = PPRNT sprintf("%8.8s ",s)
+         if (_sav_geo_mot)
+             FPRNT = FPRNT s "  "
+     }
+    }
+    VPRNT=sprintf("%10s %10s %10s ","H","K","L")
+
+    # print total scan time
+    # (_scan_time in _head reports wrong values if using count time scaling)
+
+
+
+    scan_head
+    def _scan_on \'
+        for (NPTS=0; NPTS < RS_NPTS; NPTS++) {
+
+           local i h_ca k_ca l_ca
+           H = h_ca = RS_ARRAY[NPTS][0]
+           K = k_ca = RS_ARRAY[NPTS][1]
+           L = l_ca = RS_ARRAY[NPTS][2]
+           COUNT_TIME = _ctime = RS_ARRAY[NPTS][3]
+           get_angles; calcA
+           scan_move
+           FPRNT=sprintf("%g %g %g ",h_ca,k_ca,l_ca)
+           PPRNT=""
+           for (i=0;i<_numgeo;i++) {
+                   PPRNT = PPRNT sprintf("%8.4f ",A[mA[i]])
+                   if (_sav_geo_mot)
+                           FPRNT = FPRNT sprintf("%.8g ",A[mA[i]])
+           }
+           VPRNT=sprintf("%10.5g %10.5g %10.5g ",h_ca,k_ca,l_ca)
+           scan_loop
+           scan_data(NPTS,l_ca)
+           H=h_ca; K=k_ca; L=l_ca
+           scan_plot
+        }
+        scan_tail
+    \'
+    _scan_on
+}'
+
+
+#==============================================================================
+# INTERNAL ROUTINES
+#==============================================================================
+#
+#------------------------------------------------------------------------------
+# _rodscan_parse     - builds up the arrays of valid L-positions based on the
+#		       rodscan parameters.
+# 		       Note that invalid hkl-points or motor positions
+#                      resulting in limit violations will automatically be
+#                      rejected during the building of the array.
+
+def _rodscan_parse(h_val, k_val, l_st, l_en, dl, cnt_time, brg_list) '{
+#   ==============
+
+    local _max_pts, _npts, _l, _do_point, _bad_hkl, _bad_lim
+    local next_brg, _beta, I, _i, _cnt_total
+
+    # convert the list of Bragg peaks to an array
+    _nbrg = split(brg_list,brg_assoc_array)
+    local array brg_array[_nbrg]
+    for (_ii = 0; _ii<_nbrg; _ii++){
+        brg_array[_ii] = brg_assoc_array[_ii]
+    }
+    # make sure the array is sorted in ascending order
+    brg_array = array_op("sort",brg_array)
+
+    ### block: find all allowed l-values
+
+    # maximum number of possible data points
+    # (used to initialize array, will be cut to right size later on)
+    _max_pts = int(((l_en-l_st)/dl)+1+RS_SMALL)*RS_BRG_DENS_FAC;
+
+    if (RS_DEBUG > 0){
+        printf("\n*--- starting search for valid l-values ---*\n\n")
+        printf("max-points = %d\n",_max_pts)
+    }
+
+    local array _l_array[_max_pts]
+    _npts = 0
+    for(_l=l_st; _l<=l_en+RS_SMALL; _l=_l+dl){
+
+        _do_point = 1
+
+        # exclude points which are not reachable in k-space or produce
+        # limit violations on the motors
+        H = h_val; K=k_val; L=_l;
+        _bad_hkl = calcA
+        _bad_lim = 0
+        _hkl_lim
+        if((_bad_hkl < 0) || (_bad_lim > 0)){
+            printf("skipping point HKL = %.4f %.4f %.4f\n", H, K, L)
+            _do_point = 0
+        }
+
+        # exclude points close to the Bragg peaks
+        next_brg = _rs_closest_brg(_l, brg_array)
+        if (fabs(_l - next_brg) < RS_BRG_EXCL_RNG-RS_SMALL){
+            _do_point = 0
+        }
+
+        if (_do_point){
+            _l_array[_npts] = _l
+            _npts++
+        }
+
+        # check the higher density raster points
+        for (_i=1; _i<RS_BRG_DENS_FAC; _i++){
+
+            _do_point = 1
+            _l1 = _l + _i*(dl/RS_BRG_DENS_FAC)
+
+            # see if l-value is in the denser range
+            next_brg = _rs_closest_brg(_l1, brg_array)
+            if (fabs(_l1 - next_brg) <= RS_BRG_DENS_RNG-RS_SMALL){
+
+                # exclude points which are not reachable in k-space or produce
+                # limit violations on the motors
+                H = h_val; K=k_val; L=_l1;
+                _bad_hkl = calcA
+                _bad_lim = 0
+                _hkl_lim
+                if((_bad_hkl < 0) || (_bad_lim > 0)){
+                    printf("skipping point HKL = %.4f %.4f %.4f\n", H, K, L)
+                    _do_point = 0
+                }
+        
+                # exclude points close to the Bragg peaks
+                if (fabs(_l1 - next_brg) < RS_BRG_EXCL_RNG-RS_SMALL){
+                    _do_point = 0
+                }
+
+                # exclude those points past the end of the requested scan range
+                if (_l1 > l_en+RS_SMALL){
+                    _do_point = 0
+                }
+
+                if (_do_point){
+                    _l_array[_npts] = _l1
+                    _npts++
+                }
+            }
+        }
+    }
+    ### end of block: find l-values
+
+    if (RS_DEBUG > 0){
+        printf("\nnumber of valid l-values: %d \n",_npts)
+        printf("\n*--- finished search for valid l-values ---* \n\n")
+    }
+
+    # if no valid scan points are found, try a "soft abort"
+    # this should abort rodscan without throwing an error event, so hopefully
+    # any running macros will continue by just skipping this scan.
+    if (_npts < 1){
+        printf("Warning: Could not find any valid scan points on this rod!\n")
+        printf("Aborting this scan...\n")
+        return(0)
+    }
+
+    ### block: Fill array with HKL-values and exposure times for all l-values
+
+    local array _rs_array[_npts][4]
+    _rs_array[][0] = h_val
+    _rs_array[][1] = k_val
+
+    for(_i=0; _i<_npts; _i++){
+
+        # L-value
+        _l = _l_array[_i]
+        _rs_array[_i][2] = _l
+
+        # calculate count times, apply scaling if specified
+        if (RS_SCALE_SEC > 0){
+
+            # closest Bragg peak to current L-value        
+            next_brg = _rs_closest_brg(_l, brg_array)
+            dl_brg = _rs_calc_dl(_l, brg_array)
+    
+            # small absorption constant to avoid divisions by zero at
+            # Bragg peaks
+            _beta = 1e-7
+    
+            # calculate expected intensity
+            # $I = \sin^2(\Delta l)$
+            I = 1/ (pow(sin(PI*((_l-next_brg)/dl_brg)),2) + _beta)
+    
+            # calculate scaled count times
+            if (I > RS_SCALE_I_MAX){
+                # use minimum count time
+                _rs_array[_i][3] = RS_MIN_CNT
+    
+            } else if (I < RS_SCALE_I_MIN){
+                # use user-specified count time
+                _rs_array[_i][3] = cnt_time
+    
+            } else {
+                # scale count time or use default
+                if (RS_SCALE_SEC == 1){
+                    # use sqrt(1/I)
+                    _rs_array[_i][3] = cnt_time * sqrt(1/I)
+                } else if (RS_SCALE_SEC == 2){
+                    # use (1/I)
+                    _rs_array[_i][3] = cnt_time * (1/I)
+                } else {
+                    # unknown scaling mode, use default count time
+                    _rs_array[_i][3] = cnt_time
+                } 
+            }
+
+            # round count time to desired precision
+            if (RS_CNT_PREC > 0){
+                _rs_array[_i][3] = \
+                    round(_rs_array[_i][3]/RS_CNT_PREC)*RS_CNT_PREC
+                if(_rs_array[_i][3] > cnt_time) _rs_array[_i][3]= cnt_time
+                if(_rs_array[_i][3] < RS_MIN_CNT) _rs_array[_i][3]= RS_MIN_CNT
+            }
+
+        } else {
+          # no scaling, use specified count time
+          _rs_array[_i][3] = cnt_time
+        }
+    }
+
+    ### end of block: fill array
+
+    # print some info about the rodscan
+    _cnt_total = array_op("sum", _rs_array[][3])
+
+    printf("Rod: (%f %f L)\n", h_val, k_val)
+    printf("Minimum valid L-value: %f\n",array_op("min",_rs_array[][2]))
+    printf("Maximum valid L-value: %f\n",array_op("max",_rs_array[][2]))
+    printf("Total number of scan points: %d\n",_npts)
+    printf("Total count time: %.2f sec (%s)\n",_cnt_total,\
+            _rs_sec2timestr(_cnt_total))
+    printf("Total scan time (incl. dead time): %.2f sec (%s)\n",\
+            _cnt_total+_npts*RS_PNT_DEADTIME,\
+            _rs_sec2timestr(_cnt_total+_npts*RS_PNT_DEADTIME))
+
+    RS_CNT_TOTAL = RS_CNT_TOTAL + _cnt_total
+    RS_PNT_TOTAL = RS_PNT_TOTAL + _npts
+
+    # create global variable array to be passed to
+    unglobal RS_ARRAY
+    global array RS_ARRAY[_npts][4]
+    RS_ARRAY = _rs_array
+    RS_NPTS = _npts
+
+    # return success
+    return(1)
+}'
+
+
+#------------------------------------------------------------------------------
+# _rs_closest_brg   - find the closest Bragg peak to the current l-value
+#                     from the list.
+
+def _rs_closest_brg(l_val, brg_array_arg) '{
+#   ===============
+
+    local _ind
+
+    _ind = array_op("i_at_min",fabs(brg_array_arg-l_val))
+
+    return(brg_array_arg[_ind])
+
+}'
+
+
+#------------------------------------------------------------------------------
+# _rs_calc_dl       - calculate the spacing between the two surrounding Bragg
+#                     peaks for the current l-value.
+#                     If one of the surrounding peaks is not available, try to
+#                     extrapolate from the two nearest Bragg peaks on the other
+#                     side. If this fails also, use a default spacing on 1.
+
+def _rs_calc_dl(_l, brg_array_arg) '{
+#   ===========
+
+    local _lo_ind, _hi_ind, _dl, _nbrg
+
+    _nbrg = array_op("cols",brg_array_arg)*array_op("rows",brg_array_arg)
+    _lo_ind = _rs_lo_brg_ind(_l, brg_array_arg)
+    _hi_ind = _rs_hi_brg_ind(_l, brg_array_arg)
+
+    if (_lo_ind >-1 && _hi_ind >-1){
+        _dl = brg_array_arg[_hi_ind] - brg_array_arg[_lo_ind]
+    } else if (_lo_ind > 0){
+        _dl = brg_array_arg[_lo_ind] - brg_array_arg[_lo_ind-1]
+    } else if (_hi_ind < _nbrg-1){
+        _dl = brg_array_arg[_hi_ind+1] - brg_array_arg[_hi_ind]
+    } else {
+      # We do not seem to have any information about dl, so use 1 as a default
+      _dl = 1
+    }
+
+    return(_dl)
+
+}'
+
+
+#------------------------------------------------------------------------------
+# _rs_hi_brg_ind    - find the next higher Bragg peak from the current l-value
+#                     in the array. Returns its array index.
+
+def _rs_hi_brg_ind(l_val, brg_array_arg) '{
+#   ==============
+
+    local _ind, _ii, _nbrg
+
+    _nbrg = array_op("cols",brg_array_arg)*array_op("rows",brg_array_arg)
+
+    _ind = -1
+    for(_ii=0; _ii<_nbrg; _ii++){
+        if(brg_array_arg[_ii] >= l_val){
+            _ind = _ii
+            break
+        }
+    }
+
+    return(_ind)
+
+}'
+
+
+#------------------------------------------------------------------------------
+# _rs_lo_brg_ind    - find the next lower Bragg peak from the current l-value
+#                     in the array. Returns its array index.
+
+def _rs_lo_brg_ind(l_val, brg_array_arg) '{
+#   ==============
+
+    local _ind, _ii, _nbrg
+
+    _nbrg = array_op("cols",brg_array_arg)*array_op("rows",brg_array_arg)
+
+    _ind = -1
+    for(_ii=0; _ii<_nbrg; _ii++){
+        if(brg_array_arg[_ii] > l_val){
+            break
+        }
+        _ind = _ii
+    }
+
+    return(_ind)
+
+}'
+
+#------------------------------------------------------------------------------
+# _rs_sec2timestr   - convert seconds to a time string in the form hh:mm:ss.s
+#
+
+def _rs_sec2timestr(t) '{
+#   ===============
+
+    local timestr h m s
+
+    h=int(t/3600)
+    m=int(t/60)-h*60
+    s=t-h*3600-m*60
+    timestr = sprintf("%d:%02d:%04.1f",h,m,s)
+
+    return timestr
+
+}'
+
+#------------------------------------------------------------------------------
+# round             - round a number to the next nearest integer
+#                     (symmetric around zero)
+
+# define this only if there is no round() function available yet
+if (!(whatis("round") & 0x2)){
+    def round(x) '{
+    #   =====
+    
+        return int(x > 0.0 ? x + 0.5 : x - 0.5);
+    }'
+}
+
+
+#------------------------------------------------------------------------------
+# floor()             - return the next lower integer
+#
+
+# define this only if there is no floor() function available yet
+if (!(whatis("floor") & 0x2)){
+    def floor(x) '{
+    #   =====
+    
+        return int(x > 0.0 ? x : x - 1);
+    }'
+}
+
+
+#------------------------------------------------------------------------------
+# ceil()             - return the next higher integer
+#
+
+# define this only if there is no ceil() function available yet
+if (!(whatis("ceil") & 0x2)){
+    def ceil(x) '{
+    #   ====
+    
+        return int(x > 0.0 ? x+1 : x);
+    }'
+}
+
+
+#+
+#------------------------------------------------------------------------------
+#-
+#==============================================================================
+# to create the help text file for this macro, run the following code in a
+# unix shell within the same directory where this macro file is located:
+# (file must be saved in unix ASCII format, not DOS ASCII format)
+# 
+#	rm -f rodscan.txt
+#	awk '                    \
+#          BEGIN{P=0}            \
+#          /#[-]$$/{P=0}         \
+#          {if (P == 1) print}   \
+#          /#[+]/{P=1}           \
+#          ' rodscan.mac >> rodscan.txt
+#
+#==============================================================================
+# End of $Id$
+#==============================================================================

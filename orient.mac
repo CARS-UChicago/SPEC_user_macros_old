@@ -1,0 +1,1333 @@
+#+
+#==============================================================================
+# Macroname: orient.mac 
+#            ==========
+#
+# CVS-Info:
+# ---------
+#
+# $Date$
+# $Author$
+# $Source$
+# $Revision$
+#
+# Description:	Macro definitions to provide a more powerful and intuitive
+#               user interface for the built-in orientation matrix macros in
+#               SPEC (defined in ub.mac)
+# 
+# Note:         This macro is in parts based on the orientation matrix
+#               routines in hkldefs.mac macro by David Maden.
+#
+# Authors(s):           C. M. Schlepuetz (CS), D. Maden (DM)
+# Co-author(s):         P. R. Willmott (PW)
+# Address:              Surface Diffraction Station
+#                       Materials Science Beamline X04SA
+#                       Swiss Light Source (SLS)
+#                       Paul Scherrer Institut
+#                       CH - 5232 Villigen PSI
+# Created:              2006/04/15
+#
+#-
+# Chained macro definitions affected by this macro:
+# -------------------------------------------------
+# - none
+#
+# Change Log:
+# -----------
+# 
+# 2006/04/15 (CS):
+# - started first version of this macro
+#
+# 2006/04/28 (CS):
+# - scope of variables is very confusing in SPEC. For orientShow and
+#   orientReplace, I had to assign global variables to be used inside the
+#   eval() command to produce the correct output. Somehow, the scope of
+#   variables going into the eval() command or comming out of it is poorly
+#   defined. Not a very elegant solution, but it seems to work.
+#
+# 2006/05/01 (CS):
+# - added orientSave and orientLoad.
+# - some minor bug fixes, cosmetics.
+#
+# 2006/05/03 (CS):
+# - corrected error in the calculation of the inverse B matrix: Publications
+#   express B and InvB  in units of 2*PI. This is why I had to introduce this
+#   factor again for the (3,3) Matrix element.
+#
+# 2006/05/11 (CS):
+# - had to remove the short versions of the macro names because some of them
+#   coincided with SPEC symbols like motor names (oa).
+#
+# 2006/08/09 (CS):
+# - fixed bug in orientAdd: when adding an existing orientation and user is
+#   asked to replace the old one, them macro terminated with an error.
+# - added 'orientFitLattice' for fitting lattice parameters to experimental
+#   reflections.
+#
+# 2006/10/04 (PW,CS):
+# - fixed bug in the miscut angle calculations. Using a (1,2,3)-type Euler
+#   angle sequence (rotation around z-, then y-, then x- axis). See
+#   http://ai.stanford.edu/~diebel/attitude/attitude.pdf
+# - renamed miscut angles to
+#     rho   ([0 0 1] -> [0-1 0]), around x-axis
+#     sigma ([0 0 1] -> [1 0 0]), around y-axis
+#     tau   ([1 0 0] -> [0 1 0]), around z-axis
+#   instead of omegaOff, chiOff, phiOff
+#   This is sufficiently general to work with any diffractometer geometry.
+# - fixed bug in orientCalcInvB affecting element InvB[6].
+# 
+# 2007/04/19 (CS):
+# - added call to 'showUB' (SPEC built-in) to 'orientShow' and 'orientFit'.
+#
+# 2007/10/31 (CS):
+# - Major reorganization in the data structure: replaced the string based
+#   ORIENT_DATA with a proper array ORIENT_DATA containing all the reflection
+#   data. This makes many tricks with global variables and calls to the eval()
+#   function unnecessary.
+# - Added 'orientEdit' to directly edit the values for any reflection.
+# - removed the unnecessary restriction that all reflections must have integer
+#   h, k, and l values.
+#
+# 2009/08/01 (CS):
+# - replaced calls to A[_j] with A[mA[_j]], which generalizes the code to
+#   configurations where the geometry motors are not the first motors in the 
+#   motor configuration file.
+#
+# To do:
+# ------
+# - miscut angle calculations are still dodgy in conjunction with the fitting
+#   of lattice parameters and angles.
+#
+#------------------------------------------------------------------------------
+#
+#==============================================================================
+# Define some global variables
+# ----------------------------
+
+    # Save the name of this macro file (used for the help function).
+    global ORIENT_MAC
+           ORIENT_MAC = DOFILE
+
+    global ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    def g_rho   'ORIENT_MCUT[0]'
+    def g_sigma 'ORIENT_MCUT[1]'
+    def g_tau   'ORIENT_MCUT[2]'
+
+
+#+
+#==============================================================================
+# This macro file contains the following commands:
+#-
+
+#+
+#------------------------------------------------------------------------------
+#  orienthelp           - generate help text. This is obtained by displaying
+#                         the file orient.txt, which should sit in the same
+#                         directory as this file.
+#-
+
+# allow for misspelled help commands:
+def helporient 'orienthelp'
+def helpOrient 'orienthelp'
+def orientHelp 'orienthelp'
+
+def orienthelp '{
+#   ==========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local  file, ll
+
+    unix (sprintf ("dirname %s", ORIENT_MAC), _1)
+    ll = length (_1)
+    if (substr (_1, ll, 1) == "\n") _1 = substr (_1, 1, (ll - 1))
+    file = sprintf ("%s/orient.txt", _1)
+    if (file_info (file, "-e")) {
+      unix (sprintf ("cat %s | less", file))
+    } else {
+      print "\
+      \n\
+      orientShow         - display list of measured reflections.\n\
+      orientClear        - clear list of measured reflections.\n\
+      orientRemove       - remove a reflection from the list.\n\
+      orientAdd          - add a reflection to the measured reflection list.\n\
+      orientEdit         - edit values for a reflection in the list.\n\
+      orientReplace      - replace a reflection in the list of reflections.\n\
+      orientFit          - perform an orientation matrix fit.\n\
+      orientFitLattice   - derives more accurate lattice constant based on\n\
+                           the orientation matrix fit.\n\
+      orientMiscut       - set sample \"miscut\" angles.\n\
+      orientShowMiscut   - show current sample \"miscut\" angles.\n\
+      orientSave         - save list of measured reflections to file\n\
+      orientLoad         - load a list of measured reflections from file\n\
+      "
+    }
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientMiscut         - set sample "miscut" angles
+#
+#   Usage:
+#     a) 3 args
+#                orientMiscut <rho> <sigma> <tau>
+#     b) 0 args
+#                orientMiscut   -- user will be prompted for
+#                                  <rho> <sigma> and <tau>.
+#-
+  def orientMiscut '{
+#     ============
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    if ($# == 3) {
+      _1 = $1; _2 = $2; _3 = $3
+    } else if ($# == 0) {
+      print "\nEnter sample miscut angles:"
+      _1 = getval(" rho ", g_rho)
+      _2 = getval(" sigma ", g_sigma)
+      _3 = getval(" tau ", g_tau)
+    } else {
+      print "Usage:  setmiscut  or  setmiscut rho sigma tau"
+      exit
+    }
+
+    gpset _1 g_rho
+    gpset _2 g_sigma
+    gpset _3 g_tau
+
+    # calculate orientation matrix from miscut angles and B-matrix
+    orientCalcUB
+
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientShowMiscut     - show the sample "miscut" angles
+#-
+
+  def orientShowMiscut '{
+#     ================
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    # calculate the miscut angles from the UB matrix
+    orientCalcMiscut
+
+    printf("\n")
+    printf("rho   ([0 0 1] -> [0-1 0]) = %.4f\n", g_rho)
+    printf("sigma ([0 0 1] -> [1 0 0]) = %.4f\n", g_sigma)
+    printf("tau   ([1 0 0] -> [0 1 0]) = %.4f\n", g_tau)
+
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientShow           - display list of measured reflections.
+#
+#   Usage:
+#          orientShow [<refl-number> ["terse"] ]
+#
+#   if called with the second argument "terse", a much compressed
+#   output is produced.
+#-
+
+  def orientShow '{
+#     ==========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local    _hkl_integer
+    local    i, first, last, terse, hh, kk, ll, ang, diff
+
+    if ((whatis ("ORIENT_CNT") & 0x08000000) != 0) ORIENT_CNT = 0
+    if (ORIENT_CNT <= 0) {
+      print "There are no defined reflections"
+      exit
+    }
+
+    hh = 3; kk = 3; ll = 3;
+
+    terse = 0
+    if ($# > 1) terse = 1
+
+    first = 0
+    last = ORIENT_CNT
+
+    if ($# > 0) {
+      _1 = $1
+      if (_1 > 0) {
+        first = _1 - 1; last = _1
+        if (first >= ORIENT_CNT) {
+          printf("Sorry, there are only %d reflections defined.\n", ORIENT_CNT)
+          exit
+        }
+      }
+    }
+
+    if (!terse){
+      printf(" \n(Using lattice constants:\n")
+      printf(" a = %.4g, b = %.4g, c = %.4g, ", g_aa, g_bb, g_cc)
+      printf("alpha = %.6g, beta = %.6g, gamma = %.6g)\n",\
+              g_al, g_be, g_ga)
+    }
+
+    printf("\n------------------------------------------------\n")
+
+    if (!terse){
+      printf(" The Defined Reflections are:         (measured)\n")
+      printf("                                    (calculated)\n")
+      printf("\n")
+    }
+
+    _1 = sprintf("%3s %9s %8s %8s ","#","H","K","L")
+    _2 = sprintf("%3s %9s %8s %8s ","-","-","-","-")
+
+    for(_i=0;_i<_numgeo;_i++){
+      _1 = sprintf("%s %9s",_1,motor_mne(mA[_i]))
+      _2 = sprintf("%s %9s",_2,"---")
+    }
+
+    if (terse) {
+      print _1
+      print _2
+    } else {
+      print _1, "   dev\'n"
+      print _2, "   -----"
+    }
+
+
+    for (i = first; i < last; i++) {
+
+      # retrieve values from _orient_tmp
+      hh = ORIENT_DATA[i][0]
+      kk = ORIENT_DATA[i][1]
+      ll = ORIENT_DATA[i][2]
+      for(_j=0;_j<_numgeo;_j++){
+        ang[_j] = ORIENT_DATA[i][_j+3]
+      }
+
+      # print line with measured reflection data
+      printf ("%3d %9.4f %8.4f %8.4f ", (i+1), hh, kk, ll)
+      for(_j=0;_j<_numgeo;_j++){
+        printf(" %9.4f",ang[_j])
+      }
+      printf("\n")
+
+       # obtain reflection position from UB matrix and calculate deviation from
+       # the measured values.
+       if (!terse) {
+
+         # calculate HKL values
+         for(_j=0;_j<_numgeo;_j++){
+           A[mA[_j]] = ang[_j]
+         }       
+         calcHKL
+         printf ("%3s %9.4f %8.4f %8.4f ", " ", H, K, L)
+         diff = sqrt((pow(hh-H,2) + pow(kk-K,2) + pow(ll-L,2)))
+
+         # calculate angles
+         H = hh; K = kk; L = ll
+         if(!calcA){
+           for(_j=0;_j<_numgeo;_j++){
+             printf(" %9.4f",A[mA[_j]])
+           }
+         }
+
+         printf("%9.4f\n",diff)
+
+        print "------------------------------------------------"
+      }
+    }
+
+    if (terse) print "------------------------------------------------"
+
+    if (!terse){
+       printf("\n")
+       showUB
+    }
+
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientClear          - clear list of measured reflections.
+#-
+
+  def orientClear '{
+#     ===========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    if (!yesno( "Really clear the list of reflections?", 0)) exit
+
+    unglobal ORIENT_DATA
+    ORIENT_CNT = 0
+
+    qcomment "The orientation matrix reflections have been cleared"
+    print "Done."
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientRemove         - remove a reflection from the list.
+#
+#   Usage:   orientRemove <h> <k> <l>
+#
+#   The specified reflection will be removed from the list.
+#-
+
+  def orientRemove '{
+#     ============
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local    i, _refl1, fnd
+    local    _hh, _kk, _ll, _h1, _k1, _l1
+
+    if (ORIENT_CNT <= 0) {
+      ORIENT_CNT = 0
+      print "There are no reflections."
+      exit
+    }
+    if ($# != 3) {
+      print "\aUsage:   orientRemove <h> <k> <l>"
+      exit
+    }
+    _hh = $1; _kk = $2; _ll = $3
+    fnd = -1
+    for (i = 0; i < ORIENT_CNT; i++) {
+      _h1 = ORIENT_DATA[i][0]
+      _k1 = ORIENT_DATA[i][1]
+      _l1 = ORIENT_DATA[i][2]
+      if ((_hh == _h1) && (_kk == _k1) && (_ll == _l1)) fnd = i
+    }
+    if (fnd < 0) {
+      printf ("\a<%d %d %d> is not in the reflection list.\n", _hh, _kk, _ll)
+      exit
+    }
+    _ii = fnd + 1
+    orientShow _ii terse
+    if (!yesno( "Really remove this reflection?", 0)) exit
+
+    ORIENT_CNT--
+
+    array _orient_tmp [ORIENT_CNT][3+_numgeo]
+    _orient_tmp[0:fnd-1][] = ORIENT_DATA[0:fnd-1][]
+    if(fnd < ORIENT_CNT){
+      _orient_tmp[fnd:ORIENT_CNT-1][] = ORIENT_DATA[fnd+1:ORIENT_CNT][]    
+    }
+    array ORIENT_DATA [ORIENT_CNT][3+_numgeo]
+    ORIENT_DATA = _orient_tmp
+    unglobal _orient_tmp
+
+
+    print "Done."
+    orientShow 0 terse
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientAdd            - add a reflection to the list of measured reflections.
+#
+#   Usage:
+#        orientAdd <h> <k> <l>  - the current diffractometer angles are used.
+#     or
+#        orientAdd <h> <k> <l> <pos1> <pos2> ... <posn>
+#
+#    <pos1> ... <posn> are the motor positions of the geometry motors in the
+#    same order as they are listed in the configuration file (use \'wh\')
+#
+#    A reflection will be added to the list of reflections. A check is made
+#    that the reflection does not already exist.
+#-
+
+  def orientAdd '{
+#     =========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    global   _orient_refldata
+
+    local    i, hh, kk, ll
+
+    if (($# != 3) && ($# != 3 + _numgeo)) {
+      print "\aBad args. Use \"hklhelp\" for help."
+      unglobal _orient_refldata
+      exit
+    }
+
+    args =  "$*"
+    split(args,_orient_refldata)
+
+    hh = _orient_refldata[0]
+    kk = _orient_refldata[1]
+    ll = _orient_refldata[2]
+
+    if ($# == 3) {
+      waitmove; get_angles
+      for (j = 0; j < _numgeo; j++){
+        _orient_refldata[3+j] = A[mA[j]]
+      }
+    }
+
+    _h1 = 0; _k1 = 0; _l1 = 0
+    for (i = 0; i < ORIENT_CNT; i++) {
+      _h1 = ORIENT_DATA[i][0]
+      _k1 = ORIENT_DATA[i][1]
+      _l1 = ORIENT_DATA[i][2]
+      if ((hh == _h1) && (kk == _k1) && (ll == _l1)) {
+        printf ("\aReflection <%d %d %d> is already defined.\n", _h1, _k1, _l1)
+        if (!yesno( "Would you like to replace it?", 0)){
+          exit
+        } else{
+          # replace i-th reflection
+          ORIENT_DATA[i][0] = _orient_refldata[0];
+          ORIENT_DATA[i][1] = _orient_refldata[1];
+          ORIENT_DATA[i][2] = _orient_refldata[2];
+          for (j = 0; j < _numgeo; j++){
+            ORIENT_DATA[i][3+j] = _orient_refldata[3+j];
+          } 
+          printf ("Reflection number %d has been replaced.", (i + 1))
+          unglobal _orient_refldata
+          exit
+        }
+      }
+    }
+
+    # add reflection to the end of list if it does not yet exist
+
+    if(ORIENT_CNT>0){
+      array _orient_tmp [ORIENT_CNT][3+_numgeo]
+      _orient_tmp = ORIENT_DATA
+    }
+    array ORIENT_DATA [ORIENT_CNT+1][3+_numgeo]
+    if(ORIENT_CNT>0){
+      ORIENT_DATA[0:ORIENT_CNT-1][] = _orient_tmp
+    }
+
+    ORIENT_DATA[ORIENT_CNT][0] = _orient_refldata[0];
+    ORIENT_DATA[ORIENT_CNT][1] = _orient_refldata[1];
+    ORIENT_DATA[ORIENT_CNT][2] = _orient_refldata[2];
+    for (j = 0; j < _numgeo; j++){
+      ORIENT_DATA[ORIENT_CNT][3+j] = _orient_refldata[3+j];
+    } 
+
+    ORIENT_CNT++
+    printf ("Reflection number %d added to list.", ORIENT_CNT)
+    unglobal _orient_refldata, _orient_tmp
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientEdit           - edit values for a reflection in the list.
+#
+#   Usage:
+#        orientEdit     - then type in the values in the dialog.
+#     or
+#        orientEdit <#> <h> <k> <l> <pos1> <pos2> ... <posn>
+#
+#    <#> is the list number of the reflection to edit.
+#
+#    <pos1> ... <posn> are the motor positions of the geometry motors in the
+#    same order as they are listed in the configuration file (use \'wh\')
+#
+#-
+
+  def orientEdit '{
+#     ==========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    global   _orient_refldata
+
+    local    i, hh, kk, ll
+
+    if (($# != 0) && ($# != 4 + _numgeo)) {
+      print "\aBad args. Use \"hklhelp\" for help."
+      unglobal _orient_refldata
+      exit
+    }
+
+    if ($# > 0){
+      args =  "$*"
+      split(args,_orient_refldata)
+  
+      nn = _orient_refldata[0]-1
+      hh = _orient_refldata[1]
+      kk = _orient_refldata[2]
+      ll = _orient_refldata[3]
+      for(_j=0;_j<_numgeo;_j++){
+        ang[_j] = _orient_refldata[_j+3]
+      }
+
+      if (nn >= ORIENT_CNT) {
+        printf ("\aReflection number %d does not yet exist.\n", nn+1)
+        printf ("\aUse \'orientAdd\' to add it to the list.\n")
+        unglobal _orient_refldata
+        exit
+      }
+    } else{
+
+      orientShow 0 terse
+
+      nn = getval("Reflection number to edit:",1)-1
+      if (nn >= ORIENT_CNT) {
+        printf ("\aReflection number %d does not yet exist.\n", nn+1)
+        printf ("\aUse \'orientAdd\' to add it to the list.\n")
+        unglobal _orient_refldata
+        exit
+      }
+
+      hh = getval("H = ",ORIENT_DATA[nn][0])
+      kk = getval("K = ",ORIENT_DATA[nn][1])
+      ll = getval("L = ",ORIENT_DATA[nn][2])
+      for(_j=0;_j<_numgeo;_j++){
+        _str = sprintf("%s = ",motor_mne(mA[_j]))
+        ang[_j] = getval(_str,ORIENT_DATA[nn][3+_j])
+      }   
+    }
+
+          ORIENT_DATA[nn][0] = hh
+          ORIENT_DATA[nn][1] = kk
+          ORIENT_DATA[nn][2] = ll
+          for (_j = 0; _j < _numgeo; _j++){
+            ORIENT_DATA[nn][3+_j] = ang[_j];
+          } 
+    unglobal _orient_refldata
+    orientShow 0 terse
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientReplace        - replace a reflection in the list of reflections.
+#
+#   Usage:
+#        orientReplace <h> <k> <l> - the current motor positions will be used.
+#     or
+#        orientReplace <h> <k> <l> <pos1> <pos2> ... <posn>
+#
+#    <pos1> ... <posn> are the motor positions of the geometry motors in the
+#    same order as they are listed in the configuration file (use \'wh\')
+#
+#    The specified <hkl> reflection will be found in the list of reflections
+#    and replaced.
+#-
+
+  def orientReplace '{
+#     =============
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    global   _orient_refldata
+
+    local    i, ii, hh, kk, ll, fnd
+
+    if (($# != 3) && ($# != 3 + _numgeo)) {
+      print "\aBad args. Usage:"
+      print "      orientReplace <h> <k> <l>"
+      print "  or"
+      print "      orientReplace <h> <k> <l> <pos1> <pos2> ... <posn>"
+      print " "
+      print "  where n is equal to the number of geometry motors."
+
+      unglobal _orient_refldata
+      exit
+    }
+
+    args =  "$*"
+    split(args,_orient_refldata)
+
+    hh = _orient_refldata[0]
+    kk = _orient_refldata[1]
+    ll = _orient_refldata[2]
+
+    if ($# == 3) {
+      waitmove; get_angles
+      for (j = 0; j < _numgeo; j++){
+        _orient_refldata[3+j] = A[mA[j]]
+      }
+    }
+
+    fnd = -1
+    for (i = 0; i < ORIENT_CNT; i++) {
+
+      _h1 = ORIENT_DATA[i][0]
+      _k1 = ORIENT_DATA[i][1]
+      _l1 = ORIENT_DATA[i][2]
+
+      if ((_h1 == hh) && (_k1 == kk) && (_l1 == ll)) {
+        fnd = 0
+        print "\nExisting reflection is:"
+        ii = i + 1
+        orientShow ii terse
+
+        # print line with new reflection data
+        printf ("Replacement will be:\n")
+        printf ("%3d %9.4f %9.4f %9.4f ", (i+1), hh, kk, ll)
+
+        for(_j=0;_j<_numgeo;_j++){
+          printf(" %9.4f",_orient_refldata[_j+3])
+        }
+        printf("\n")
+        printf("------------------------------------------------\n")
+
+        if (!yesno( "Really replace this reflection?", 0)){
+          unglobal _orient_refldata
+          exit
+        } else{
+
+          ORIENT_DATA[i][0] = _orient_refldata[0];
+          ORIENT_DATA[i][1] = _orient_refldata[1];
+          ORIENT_DATA[i][2] = _orient_refldata[2];
+          for (j = 0; j < _numgeo; j++){
+            ORIENT_DATA[i][3+j] = _orient_refldata[3+j];
+          } 
+          printf ("Reflection number %d has been replaced.", (i + 1))
+        }
+      }
+    }
+    unglobal _orient_refldata
+
+    if (fnd != 0){
+      printf("Reflection <%d %d %d> is not defined.",hh,kk,ll)
+      printf(" Use \'orientAdd\' to define it.\n")
+      exit
+    }
+
+    orientShow 0 terse
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientFit            - perform an orientation matrix fit
+#
+#   Usage:
+#        orientFit
+#-
+
+  def orientFit '{
+#     =========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local    i, j, _j, refl_file, chiSqAng
+    local    _miscut_sav, _ub_sav, _ncount, _refldata, ang, hkl
+
+    if ($# != 0) {
+      print "\aUsage:    orientFit"
+      exit
+    }
+
+    if (ORIENT_CNT < 3) {
+      print "\aThere are not enough reflections defined."
+      exit
+    }
+
+    # save UB-matrix in case it needs to be restored later
+    _ub_sav = UB
+
+    # calculate Miscut angles based on old UB-matrix
+    orientCalcMiscut
+    _miscut_sav = ORIENT_MCUT
+
+    reflex_beg
+    _begUB
+
+    for (i = 0; i < ORIENT_CNT; i++) {
+
+      H = ORIENT_DATA[i][0]
+      K = ORIENT_DATA[i][1]
+      L = ORIENT_DATA[i][2]
+      for(_j=0;_j<_numgeo;_j++){
+        A[mA[_j]] = ORIENT_DATA[i][_j+3]
+      } 
+
+      # add the reflex to SPECs orientation matrix fit file
+      fprintf(REFLEX,"H = %g;  K = %g;  L = %g\n",H,K,L)
+      for (j=0; j<_numgeo; j++){
+              fprintf(REFLEX,"A[%s]=%9.4f;  ",motor_mne(mA[j]),A[mA[j]])
+      }
+      fprintf(REFLEX,"\n")
+      fprintf(REFLEX,"# counts = %g\n", S[DET])
+      fprintf(REFLEX,"_addUB\n\n")
+
+      _addUB
+
+    }
+
+    fprintf(REFLEX,"_fitUB\n")
+    close(REFLEX)
+    _fitUB    
+
+    # calculate sum of squares deviation in geometry angles
+    # and HKL values
+    chiSqAng = 0
+    chiSqHKL = 0
+    for (i = 0; i < ORIENT_CNT; i++) {
+
+
+      # retrieve values from _refldata
+      hh = ORIENT_DATA[i][0]
+      kk = ORIENT_DATA[i][1]
+      ll = ORIENT_DATA[i][2]
+      for(_j=0;_j<_numgeo;_j++){
+        ang[_j] = ORIENT_DATA[i][_j+3]
+      } 
+
+      # 1.) angles
+      H = hh
+      K = kk
+      L = ll
+      calcA
+      for(_j=0;_j<_numgeo;_j++){
+        chiSqAng = chiSqAng + pow(ang[_j]-A[mA[_j]],2)
+      }
+
+      # 2.) HKL values
+      for(_j=0;_j<_numgeo;_j++){
+        A[mA[_j]] = ang[_j]
+      }       
+      calcHKL
+      chiSqHKL = chiSqHKL + (pow(hh-H,2) + pow(kk-K,2) + pow(ll-L,2))
+
+    }
+    # take average over all reflections
+    chiSqAng = sqrt(chiSqAng / ORIENT_CNT)
+    chiSqHKL = sqrt(chiSqHKL / ORIENT_CNT)
+
+    # restore A array to contain current motor positions
+    waitmove; get_angles;
+
+    # restore current values of H, K, and L
+    calcHKL
+
+    printf ("\nGoodness of fit:\n")
+    printf ("  Angular deviations = %e\n", chiSqAng)
+    printf ("  HKL deviations =     %e\n", chiSqHKL)
+    printf ("  (mean[sqrt[sum of squares]])\n")
+
+    printf ("\nMiscut angles:\n")
+    printf ("  Old miscut angles:   %9.4f, %9.4f, %9.4f\n", \
+                  _miscut_sav[0], _miscut_sav[1], _miscut_sav[2])
+    orientCalcMiscut
+    printf ("  New miscut angles:   %9.4f, %9.4f, %9.4f\n", \
+                  ORIENT_MCUT[0], ORIENT_MCUT[1], ORIENT_MCUT[2])
+
+    printf ("\nNew ")
+    showUB
+
+    # restore old miscut angles and orientation matrix if user is not
+    # satisfied with fit.
+    if (!yesno( "\nUse these values?", 0)){
+      printf("restoring old orientation matrix.\n")
+
+      # reset to old miscut angles
+      gpset _miscut_sav[0] g_rho
+      gpset _miscut_sav[1] g_sigma
+      gpset _miscut_sav[2] g_tau  
+
+      ORIENT_MCUT[0] = _miscut_sav[0]
+      ORIENT_MCUT[1] = _miscut_sav[1]
+      ORIENT_MCUT[2] = _miscut_sav[2]
+
+      for(_j=0;_j<9;_j++){
+        UB[_j] = _ub_sav[_j]
+      } 
+      exit
+    }
+}'
+
+
+#+
+#------------------------------------------------------------------------------
+#  orientFitLattice     - performs fit of lattice parameters 
+#
+#   Usage:
+#        orientFitLattice
+#
+#   Note:
+#        Lattice paramters are derived from a fitted orientation matrix. There-
+#        fore, an 'orientFit' command (fittign the orientation matrix) has to
+#        be invoked before calling 'orientFitLattice'. 'orientFitLattice' does
+#        not work if the orientation matrix was defined just via a primary and
+#        a secondary reflection (Refer to the SPEC Four-Circle Reference). The
+#        fitting is performed using the built-in 'CalcL' function. 
+#        The new lattice constants will replace (only after the user is asked
+#        for confirmation) the old values, which will be lost!
+#-
+
+  def orientFitLattice '{
+#     ================
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local    i, j, _j, refl_file
+    local    _miscut_sav, _ub_sav, ang
+
+    if ($# != 0) {
+      print "\aUsage:    orientFitLattice"
+      exit
+    }
+
+    # save old lattice paramters in case they need to be restored later
+    _u_sav = U
+
+    # calculate new lattice paramters
+    calcL
+
+    # print result
+    printf ("\nLattice paramter fit:\n\n")
+    printf ("%-16s %9s %9s %9s %9s %9s %9s\n",\
+            "REAL SPACE:", "a", "b", "c", "alpha", "beta", "gamma")
+    printf ("%16s %9.4f %9.4f %9.4f %9.4f %9.4f %9.4f\n",\
+            "Old values:", _u_sav[0], _u_sav[1], _u_sav[2], _u_sav[3],\
+            _u_sav[4], _u_sav[5])
+    printf ("%16s %9.4f %9.4f %9.4f %9.4f %9.4f %9.4f\n\n",\
+            "New values:", U[0], U[1], U[2], U[3],U[4],U[5])
+
+    printf ("%17s %8s %9s %9s %9s %9s %9s\n",\
+            "RECIPROCAL SPACE:", "a*", "b*", "c*", "alpha*", "beta*", "gamma*")
+    printf ("%16s %9.5f %9.5f %9.5f %9.4f %9.4f %9.4f\n",\
+            "Old values:", _u_sav[6], _u_sav[7], _u_sav[8], _u_sav[9],\
+            _u_sav[10],_u_sav[11])
+    printf ("%16s %9.5f %9.5f %9.5f %9.4f %9.4f %9.4f\n\n",\
+            "New values:", U[6], U[7], U[8], U[9],U[10],U[11])
+
+    # restore old orientation matrix if user is not satisfied with fit.
+    if (!yesno( "Use these values?", 0)){
+      printf("restoring old lattice paramters.\n")
+      setlat _u_sav[0] _u_sav[1] _u_sav[2] _u_sav[3] _u_sav[4] _u_sav[5]
+      exit
+    } else{
+      printf("Now using fitted lattice parameters.")
+    }
+}'
+
+
+#+
+#------------------------------------------------------------------------------
+#  orientSave           - save the list of measured reflections to file.
+#
+#   Usage:
+#        orientSave [<filename>]
+#-
+
+  def orientSave '{
+#     ==========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local _filename, i, _cont, _str_len
+
+    if ($# == 1) {
+      _filename = "$1"
+    } else if ($# == 0) {
+      _filename = getsval("Filename to save reflections:","reflections.txt")
+    } else {
+      print "\aUsage:    orientSave [<filename>]"
+      exit
+    }
+    sscanf(_filename,"%s",_filename)
+
+    _cont = 0
+    while(_cont==0){
+      if(file_info(_filename,"-e")){
+        printf("File %s already exists.\n",_filename)
+        if (yesno("Do you want to overwrite it?",0)){
+          unix(sprintf("mv %s %s%s",_filename, _filename, ".bak"))
+        } else{
+          _filename = getsval("Filename to save reflections:","reflections.txt")
+          sscanf(_filename,"%s",_filename)
+        }
+      } else{
+        _cont = 1
+      }
+    }
+
+    open(_filename)
+
+    fprintf(_filename,"# Reflections file %s\n", _filename)
+    fprintf(_filename,"# %s\n",date())
+    fprintf(_filename,"# LAMBDA = %.6g\n",LAMBDA)
+    fprintf(_filename,"#\n")
+    fprintf(_filename,"# %s %s %s","H","K","L")
+    for (j = 0; j < _numgeo; j++){
+      fprintf(_filename," %s",motor_mne(mA[j]))
+    }
+    fprintf(_filename,"\n")
+
+    for (i = 0; i < ORIENT_CNT; i++) {
+      fprintf(_filename,"%f %f %f",\
+              ORIENT_DATA[i][0],ORIENT_DATA[i][1],ORIENT_DATA[i][2])
+      for(_j=0;_j<_numgeo;_j++){
+        fprintf(_filename," %f",ORIENT_DATA[i][_j+3])
+      }
+      fprintf(_filename,"\n")   
+    }
+
+    close(_filename)
+
+}'
+
+#+
+#------------------------------------------------------------------------------
+#  orientLoad           - load a list of measured reflections from file.
+#
+#   Usage:
+#        orientLoad [<filename>]
+#-
+
+  def orientLoad '{
+#     ==========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+    global   _orient_linedata
+
+    local _filename, _str, _str_len, _orient_refldata
+
+    if ($# == 1) {
+      _filename = "$1"
+    } else if ($# == 0) {
+      _filename = getsval("Reflection filename:","reflections.txt")
+    } else {
+      print "\aUsage:    orientLoad [<filename>]"
+      exit
+    }
+    sscanf(_filename,"%s",_filename)
+
+    if(!file_info(_filename,"-e")){
+      printf("File %s does not exist.\n",_filename)
+      exit
+    }
+
+    if (ORIENT_CNT > 0){
+      printf("There are still defined reflections. These can be saved to \n")
+      printf("file before loading the new reflection data.\n")
+      if (yesno("Save current reflection data to file?",1)){
+        orientSave
+        printf("Reflection data has been saved.\n")
+      }
+      printf("\nCurrent reflection data will be cleared now.\n")
+      if (!yesno( "Really clear the list of reflections?", 0)) exit
+      unglobal ORIENT_DATA
+      qcomment "The orientation matrix reflections have been cleared"
+    }
+
+    if (getline(_filename,"open")){
+      printf("Error opening the reflection file.")
+    }
+
+    ORIENT_CNT = 0
+    _str=getline(_filename,0)
+    while(_str != -1){
+      if((substr(_str,0,1) != "#") && (substr(_str,0,1) != "\n")){
+        _ncount = split(_str,_tmp)
+        if (_ncount != 3+_numgeo){
+          printf("Cannot read reflection data:")
+          printf("Wrong number of geometry motors on line %d.",ORIENT_CNT+1)
+          getline(_filename,"close")
+          exit
+        } else{
+          _orient_linedata[ORIENT_CNT] = _str
+          ORIENT_CNT++
+        }
+      }
+      _str=getline(_filename)
+    }
+    array ORIENT_DATA [ORIENT_CNT][3+_numgeo]
+
+    for (i = 0; i < ORIENT_CNT; i++) {
+      split(_orient_linedata[i],_orient_refldata)
+      ORIENT_DATA[i][0] = _orient_refldata[0]
+      ORIENT_DATA[i][1] = _orient_refldata[1]
+      ORIENT_DATA[i][2] = _orient_refldata[2]
+      for (j = 0; j < _numgeo; j++){
+        ORIENT_DATA[i][3+j] = _orient_refldata[3+j]
+      }
+    }
+
+    getline(_filename,"close")
+
+    printf("\nLoaded reflection data:\n")
+    orientShow 0 terse
+
+}'
+
+#------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
+# Internal routines
+#------------------------------------------------------------------------------
+#
+#------------------------------------------------------------------------------
+# orientCalcB           - calculate the B matrix from the lattice parameters  
+#
+#                         B-Matrix:   [ B0  B3  B6 ]
+#                                     [ B1  B4  B7 ]
+#                                     [ B2  B5  B8 ]
+#
+# Note: All lattice parameters etc. are stored in the global U array.
+#
+
+def orientCalcB '{
+#   ===========
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    ORIENT_B[0] =  g_aa_s
+    ORIENT_B[1] =  0
+    ORIENT_B[2] =  0
+
+    ORIENT_B[3] =  g_bb_s * cos(rad(g_ga_s))
+    ORIENT_B[4] =  g_bb_s * sin(rad(g_ga_s))
+    ORIENT_B[5] =  0
+
+    ORIENT_B[6] =  g_cc_s * cos(rad(g_be_s))
+    ORIENT_B[7] = -g_cc_s * sin(rad(g_be_s)) *cos(rad(g_al))
+
+    # !!! ORIENT_B[8] is different from the publication by a factor of 2*pi !!!
+    ORIENT_B[8] =  2*PI/g_cc
+  
+}'
+
+#------------------------------------------------------------------------------
+# orientCalcInvB        - calculate the inverse of the B matrix from the
+#                         lattice parameters.  
+#
+#                         InvB-Matrix:   [ InvB0  InvB3  InvB6 ]
+#                                        [ InvB1  InvB4  InvB7 ]
+#                                        [ InvB2  InvB5  InvB8 ]
+#
+# Note: All lattice parameters etc. are stored in the global U array.
+#
+#       Formula published in O. Bunk and M.M. Nielsen, Journal of Applied
+#       Crystallography 37 (2004), 216-222.
+#
+
+def orientCalcInvB '{
+#   ==============
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    ORIENT_INVB[0] =  (1/g_aa_s)
+    ORIENT_INVB[1] =  0
+    ORIENT_INVB[2] =  0
+
+    ORIENT_INVB[3] = -(cos(rad(g_ga_s))/(g_aa_s*sin(rad(g_ga_s))))
+    ORIENT_INVB[4] =  1/(g_bb_s*sin(rad(g_ga_s)))
+    ORIENT_INVB[5] =  0
+
+    ORIENT_INVB[6] = -(1/g_aa_s)*((g_cc/(2*PI))*g_cc_s*cos(rad(g_be_s))+\\
+                             (g_cc/(2*PI))*g_cc_s*(1/tan(rad(g_ga_s)))*\\
+                             sin(rad(g_be_s))*cos(rad(g_al)))
+    ORIENT_INVB[7] =  ((g_cc/(2*PI))*g_cc_s*sin(rad(g_be_s))* \\
+                             cos(rad(g_al)))/(g_bb_s*sin(rad(g_ga_s)))
+    ORIENT_INVB[8] =  g_cc/(2*PI)
+  
+}'
+
+#------------------------------------------------------------------------------
+# orientCalcU           - calculate the U matrix from the UB and InvB matrices.
+#
+#                         U = UB * InvB
+#
+#                         U-Matrix:   [ U0  U3  U6 ]
+#                                     [ U1  U4  U7 ]
+#                                     [ U2  U5  U8 ]
+#
+# Note: All lattice parameters etc. are stored in the global U array.
+#
+
+def orientCalcU '{
+#   ===========
+
+  global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+  global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+  # calculate the inverse of B
+  orientCalcInvB
+
+  # calculate U
+  ORIENT_U[0] = UB[0]*ORIENT_INVB[0]+UB[3]*ORIENT_INVB[1]+UB[6]*ORIENT_INVB[2]
+  ORIENT_U[1] = UB[1]*ORIENT_INVB[0]+UB[4]*ORIENT_INVB[1]+UB[7]*ORIENT_INVB[2]
+  ORIENT_U[2] = UB[2]*ORIENT_INVB[0]+UB[5]*ORIENT_INVB[1]+UB[8]*ORIENT_INVB[2] 
+
+  ORIENT_U[3] = UB[0]*ORIENT_INVB[3]+UB[3]*ORIENT_INVB[4]+UB[6]*ORIENT_INVB[5] 
+  ORIENT_U[4] = UB[1]*ORIENT_INVB[3]+UB[4]*ORIENT_INVB[4]+UB[7]*ORIENT_INVB[5] 
+  ORIENT_U[5] = UB[2]*ORIENT_INVB[3]+UB[5]*ORIENT_INVB[4]+UB[8]*ORIENT_INVB[5] 
+
+  ORIENT_U[6] = UB[0]*ORIENT_INVB[6]+UB[3]*ORIENT_INVB[7]+UB[6]*ORIENT_INVB[8] 
+  ORIENT_U[7] = UB[1]*ORIENT_INVB[6]+UB[4]*ORIENT_INVB[7]+UB[7]*ORIENT_INVB[8]
+  ORIENT_U[8] = UB[2]*ORIENT_INVB[6]+UB[5]*ORIENT_INVB[7]+UB[8]*ORIENT_INVB[8]
+  
+}'
+
+#------------------------------------------------------------------------------
+# orientCalcMiscut      - calculate the miscut angles from the U-matrix.
+#
+# Note: rho   = atan2(U23, U33)
+#       sigma = -asin(U13)
+#       tau   = atan2(U12, U11)
+
+def orientCalcMiscut '{
+#   ================
+
+    global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+    global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+    local _my_rho, _my_sigma, _my_tau
+
+    # calculate U-matrix from UB and and the inverse of B
+    orientCalcU
+
+    # check if sigma is equal to +/- 90 deg --> error
+    if (acos(ORIENT_U[6])==0){
+      printf("Error in orientCalcMiscut: sigma is +/- 90 degrees. Check lattice definition.")
+    }
+
+    # calculate miscut angles
+
+    # 1. rho
+    _my_rho = deg(atan2(ORIENT_U[7], ORIENT_U[8]))
+
+    # 2. sigma  
+    _my_sigma = deg(-asin(ORIENT_U[6]))
+
+    # 3. tau
+    _my_tau = deg(atan2(ORIENT_U[3], ORIENT_U[0]))
+
+    # set new miscut angles if changed
+    gpset _my_rho g_rho
+    gpset _my_sigma g_sigma
+    gpset _my_tau g_tau  
+
+}'
+
+
+#------------------------------------------------------------------------------
+# orientCalcUB          - calculate the UB matrix from the miscut angles.
+#
+# Note: U matrix as a function of the miscut angles:
+#
+# U11 = U[0] =  cos(sigma)*cos(tau)
+# U21 = U[1] =  sin(rho)*sin(sigma)*cos(tau) - cos(rho)*sin(tau)
+# U31 = U[2] =  cos(rho)*sin(sigma)*cos(tau) + sin(rho)*sin(tau)
+# 
+# U12 = U[3] =  cos(sigma)*sin(tau)
+# U22 = U[4] =  sin(rho)*sin(sigma)*sin(tau) + cos(rho)*cos(tau)
+# U32 = U[5] =  cos(rho)*sin(sigma)*sin(tau) - sin(rho)*cos(tau)
+#
+# U31 = U[6] = -sin(sigma)
+# U32 = U[7] =  cos(sigma)*sin(rho)
+# U33 = U[8] =  cos(sigma)*cos(rho)
+#
+
+def orientCalcUB '{
+#   ============
+
+  global   ORIENT_CNT, ORIENT_DATA, ORIENT_MCUT
+  global   ORIENT_U, ORIENT_B, ORIENT_INVB
+
+  local sr, cr, ss, cs, st, ct
+
+  sr = sin(rad(g_rho));    cr = cos(rad(g_rho))
+  ss = sin(rad(g_sigma));  cs = cos(rad(g_sigma))
+  st = sin(rad(g_tau));    ct = cos(rad(g_tau))
+
+  # calculate B-matrix from lattice parameters
+  orientCalcB
+
+  # calculate U-matrix from miscut angles
+  ORIENT_U[0] =  cs*ct
+  ORIENT_U[1] =  sr*ss*ct - cr*st
+  ORIENT_U[2] =  cr*ss*ct + sr*st
+
+  ORIENT_U[3] =  cs*st
+  ORIENT_U[4] =  sr*ss*st + cr*ct
+  ORIENT_U[5] =  cr*ss*st - sr*ct
+
+  ORIENT_U[6] = -ss
+  ORIENT_U[7] =  cs*sr
+  ORIENT_U[8] =  cs*cr
+  
+  # UB = U * B
+  UB[0]=ORIENT_U[0]*ORIENT_B[0]+ORIENT_U[3]*ORIENT_B[1]+ORIENT_U[6]*ORIENT_B[2]
+  UB[1]=ORIENT_U[1]*ORIENT_B[0]+ORIENT_U[4]*ORIENT_B[1]+ORIENT_U[7]*ORIENT_B[2]
+  UB[2]=ORIENT_U[2]*ORIENT_B[0]+ORIENT_U[5]*ORIENT_B[1]+ORIENT_U[8]*ORIENT_B[2]
+
+  UB[3]=ORIENT_U[0]*ORIENT_B[3]+ORIENT_U[3]*ORIENT_B[4]+ORIENT_U[6]*ORIENT_B[5]
+  UB[4]=ORIENT_U[1]*ORIENT_B[3]+ORIENT_U[4]*ORIENT_B[4]+ORIENT_U[7]*ORIENT_B[5]
+  UB[5]=ORIENT_U[2]*ORIENT_B[3]+ORIENT_U[5]*ORIENT_B[4]+ORIENT_U[8]*ORIENT_B[5]
+
+  UB[6]=ORIENT_U[0]*ORIENT_B[6]+ORIENT_U[3]*ORIENT_B[7]+ORIENT_U[6]*ORIENT_B[8]
+  UB[7]=ORIENT_U[1]*ORIENT_B[6]+ORIENT_U[4]*ORIENT_B[7]+ORIENT_U[7]*ORIENT_B[8]
+  UB[8]=ORIENT_U[2]*ORIENT_B[6]+ORIENT_U[5]*ORIENT_B[7]+ORIENT_U[8]*ORIENT_B[8]
+
+}'
+
+#+
+#------------------------------------------------------------------------------
+#-
+#==============================================================================
+# to create the help text file for this macro, run the following code in a
+# unix shell within the same directory where this macro file is located:
+# (file must be saved in unix ASCII format, not DOS ASCII format)
+# 
+#	rm -f orient.txt
+#	awk '                    \
+#          BEGIN{P=0}            \
+#          /#[-]$$/{P=0}         \
+#          {if (P == 1) print}   \
+#          /#[+]/{P=1}           \
+#          ' orient.mac >> orient.txt
+#
+#==============================================================================
+#
+#
+# $Log$
+# Revision 1.1  2011/09/09 19:49:11  epics
+# New file
+#
+# Revision 1.8  2007/10/31 13:27:50  schlepuetz
+# Added orientEdit, ORIENT_DATA is now array, hkl can be non-integer
+#
+# Revision 1.7  2007/04/19 14:12:32  schlepuetz
+# added call to 'showUB' (SPEC built-in) to 'orientShow' and 'orientFit'.
+#
+# Revision 1.6  2006/08/09 12:15:30  schlepuetz
+# exteded output of orientShow
+#
+# Revision 1.5  2006/08/09 12:02:43  schlepuetz
+# completed help text
+#
+# Revision 1.4  2006/08/09 11:59:11  schlepuetz
+# fixed bug in orientAdd, added orientFitLattice
+#
+# Revision 1.3  2006/05/11 15:23:45  schlepuetz
+# removed short versions of the macro names.
+#
+# Revision 1.2  2006/05/04 09:34:43  schlepuetz
+# fixed bug in OrientCalcMiscut; improved documentation
+#
+# Revision 1.1  2006/05/03 07:51:43  schlepuetz
+# first version of orient.mac. Tested and o.k.
+#
+#
+#============================= End of $RCSfile$ ===

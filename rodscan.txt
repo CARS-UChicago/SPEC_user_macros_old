@@ -1,0 +1,114 @@
+#
+#==============================================================================
+# Macroname: rodscan.mac 
+#            ===========
+#
+# SVN-Info:
+# ---------
+#
+# $Date$
+# $Author$
+# $URL: file:///data/svn/software/spec/trunk/common/rodscan.mac $
+# $Revision$
+#
+# Description:  SPEC macro to perform scans along a crystal truncation rod,
+# ------------  i.e. along the L-direction. It provides enhanced features com-
+#               pared to the standard "lscan" in SPEC:
+#                 * skip Bragg points in the scan
+#                 * increase the sampling density around Bragg points
+#                 * variable scaling of the count times based on a generic
+#                   intensity profile of a truncation rod.
+#               The behaviour can be controlled via a number of parameters
+#               which can be configured in a setup dialog or directly via
+#               global variables.
+#               The scan is programmed such that it will ignore any scan points
+#               resulting in unreachable hkl-values or limit violations for any
+#               of the motors. If no valid scan points are found at all, the
+#               scan will be aborted "softly", meaning that no error exception
+#               is raised and any macro using "rodscan" will continue to run. 
+#
+# Note:         This macro functionality is entirely based on the "rod_scan"
+# -----		macro developed by Tom Trainor and coworkers at the GSECARS
+#               beamlines at Sector 13 of the Advanced Photon Source. The
+#               original version is modified here to use single open slit
+#               exposures in the stationary mode instead of rocking scans. As a
+#               result, only one scan along L is executed, rather than a series
+#               of rocking scans for each L-value. Consequently, "rodscan"
+#               needs to adapt some of the SPEC standard scan behavior (like
+#               calling scan_head), and is therefore more of a modification a
+#               standard "lscan", adding to it the specific features developed
+#               at Sector 13.
+#
+# Author(s):            C. M. Schlepuetz (CS)
+# Co-author(s):         
+# Address:              University of Michigan
+#                       Department of Physics
+#                       450 Church Street
+#                       Ann Arbor, MI, 48109-1040
+#                       United States
+# Contact:              cschlep@umich.edu
+# Created:              2010/03/15
+#
+#==============================================================================
+# This macro file contains the following commands:
+#------------------------------------------------------------------------------
+# rodscanhelp        - generates this help text. This is obtained by
+#                      displaying the file rodscan.txt, which should sit in the
+#                      same directory as this macro file.
+#
+#------------------------------------------------------------------------------
+# rodscan_setup      - setup the parameters for a rodscan, such as the L-range
+#                      around Bragg points to skip, the range of higher density
+#                      sampling around Bragg peaks, the count time scaling,
+#                      etc.
+#		       These parameters can also be controled via the corres-
+#                      ponding global variables, whose names are displayed
+#                      during this setup routine, to facilitate scripting of
+#                      large sets of rodscan measurements.
+#
+#   Usage: rodscan_setup    # then anwer the questions
+#		       
+#------------------------------------------------------------------------------
+# rodscan_show       - display the current rodscan parameters.
+#
+#   Usage: rodscan_show
+#  
+#------------------------------------------------------------------------------
+# rodscan            - performs a scan along the L-direction for a given
+#		       position in H and K. It is similar to 'lscan', but
+# 		       provides additional features, such as scaling of the
+#                      count times according to the l-position, skipping of the
+#                      Bragg points and increasing the sampling density around
+#                      Bragg points.
+#
+#   Usage: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time>
+#
+#                      The HKL-rod is scanned from L=<L_start> to L=<L_end> in
+#                      steps of size <del_L> with count time <count_time>.
+#                      Bragg points are at all integer L-positions.
+#
+#      or: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time> \
+#                 "<Bragg_List>"
+#
+#                      Bragg points are located at all l-values specified in
+#                      <Bragg_List>, which must be a single string argument
+#                      with a whitespace delimited list of the Bragg positions.
+#                      The next Bragg peak positions outside the scan range
+#                      should also be listed in order to guarantee correct
+#                      spacing and count time scaling.
+#
+#      or: rodscan <H> <K> <L_start> <L_end> <del_L> <count_time> \
+#                  <L_Bragg> <dL_Bragg> 
+#
+#                      Bragg points are at all L-positions given by
+#                          L = <L_Bragg> + N*<dl_Bragg>,
+#                      where N is any integer (also negative).
+#
+#   Examples: rodscan 3 2 0.2 4.5 0.05 1 1 3
+#                      (32L)-rod from 0.2 to 4.5 in steps of 0.05 counting 1 s
+#                      Bragg peaks at 1 and 4
+#
+#             rodscan 1 2 0.2 5.5 0.01 0.1 "0 1 3 4 6"
+#                      (12L)-rod from 0.2 to 4.5 in steps of 0.01 counting 0.1s
+#                      with Bragg peaks at L=0,1,3,4,6.
+#------------------------------------------------------------------------------
