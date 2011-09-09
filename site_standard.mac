@@ -419,7 +419,7 @@ def user_getcounts '{
     # using image_count routine  
     } else if ( EPICS_COUNT == 4 ) {
         S[iroi] = 0
-        S[iroi] = epics_get(PILATUS_ROI_PV)
+        S[iroi] = epics_get(PILATUS_STATS_PV)
   
     # using xrf_med count routine
     } else if (EPICS_COUNT == 5) {
