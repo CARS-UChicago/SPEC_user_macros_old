@@ -8,24 +8,27 @@
 global PILATUS_PREFIX
 global PILATUS_DET_PREFIX
 global PILATUS_ROI_PREFIX
+global PILATUS_STATS_PREFIX
 
 
 global PILATUS_IMAGE_DIR
 global PILATUS_WRITE_FILES
 
-if( unset("PILATUS_PREFIX") ) PILATUS_PREFIX = ""
-if( unset("PILATUS_DET_PREFIX") ) PILATUS_IMAGE_DIR = ""
-if( unset("PILATUS_ROI_PREFIX") ) PILATUS_IMAGE_DIR = ""
-if( unset("PILATUS_IMAGE_DIR") ) PILATUS_IMAGE_DIR = ""
-if( unset("PILATUS_WRITE_FILES") ) PILATUS_WRITE_FILES = FALSE
+if( unset("PILATUS_PREFIX") )       PILATUS_PREFIX = ""
+if( unset("PILATUS_DET_PREFIX") )   PILATUS_DET_PREFIX = ""
+if( unset("PILATUS_ROI_PREFIX") )   PILATUS_ROI_PREFIX = ""
+if( unset("PILATUS_STATS_PREFIX") ) PILATUS_STATS_PREFIX = ""
+if( unset("PILATUS_IMAGE_DIR") )    PILATUS_IMAGE_DIR = ""
+if( unset("PILATUS_WRITE_FILES") )  PILATUS_WRITE_FILES = FALSE
 
 
 # need some more globals (kludge)
-global    PILATUS_ROI_PV   
-global    PILATUS_ROI_ARRAY_PV 
-global    PILATUS_ROI_ARRAY_START_PV
-global    PILATUS_ROI_ARRAY_NUSE_PV
-global    PILATUS_ROI_ARRAY_ACQ_PV
+global    PILATUS_STATS_PV   
+global    PILATUS_STATS_ARRAY_PV 
+global    PILATUS_STATS_ARRAY_START_PV
+global    PILATUS_STATS_ARRAY_NUSE_PV
+global    PILATUS_STATS_ARRAY_ACQ_PV
+global    PILATUS_STATS_BgdWidth_PV
 global    PILATUS_IMGPATH_PV
 global    PILATUS_FNAME_PV
 global    PILATUS_FILENUMBER_PV
@@ -40,11 +43,10 @@ global    PILATUS_ABORT_PV
 global    PILATUS_ACQMODE_PV
 global    PILATUS_READOUT_TIME
 
-global    PILATUS_ROI_0_MinX_PV
-global    PILATUS_ROI_0_SizeX_PV
-global    PILATUS_ROI_0_MinY_PV
-global    PILATUS_ROI_0_SizeY_PV
-global    PILATUS_ROI_0_BgdWidth_PV
+global    PILATUS_ROI_MinX_PV
+global    PILATUS_ROI_SizeX_PV
+global    PILATUS_ROI_MinY_PV
+global    PILATUS_ROI_SizeY_PV
 
 global    PILATUS_Hp
 global    PILATUS_Hw
@@ -66,10 +68,15 @@ def _setup_img '{
      if ( PILATUS_DET_PREFIX == "") PILATUS_DET_PREFIX = "cam1:"
      PILATUS_DET_PREFIX = getsval("Enter PILATUS specific detector name i.e. cam1:",PILATUS_DET_PREFIX)
 
-     # PILATUS_ROI_PREFIX is the pv used by areaDetector to identify a specific a ROI plugin.
-     # When only one ROI plugin is used it is usally (ROI1:)
-     if ( PILATUS_ROI_PREFIX == "") PILATUS_DET_PREFIX = "ROI1:"
+     # PILATUS_ROI_PREFIX is the pv used by areaDetector to identify a specific ROI plugin.
+     # The first ROI plugin is usally (ROI1:)
+     if ( PILATUS_ROI_PREFIX == "") PILATUS_ROI_PREFIX = "ROI1:"
      PILATUS_ROI_PREFIX = getsval("Enter PILATUS ROI plugin name i.e. ROI1:",PILATUS_ROI_PREFIX)
+     
+     # PILATUS_STATS_PREFIX is the pv used by areaDetector to identify a specific a statistics plugin.
+     # The first statistics plugin is usally (Stats1:)
+     if ( PILATUS_STATS_PREFIX == "") PILATUS_STATS_PREFIX = "Stats1:"
+     PILATUS_STATS_PREFIX = getsval("Enter PILATUS statistics plugin name i.e. STATS1:",PILATUS_STATS_PREFIX)
      
      if (PILATUS_MOUNT == "") PILATUS_MOUNT = "/home/det/cars5/Data"
      PILATUS_MOUNT = getsval("Enter mount point relative to camserver home directory",PILATUS_MOUNT)
@@ -87,11 +94,12 @@ def _setup_img '{
      PILATUS_Vw = getval("Enter PILATUS vert roi width in microns",PILATUS_Vw)	
 
      # rois pvs
-     PILATUS_ROI_PV             = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:Net_RBV"
-     PILATUS_ROI_ARRAY_PV       = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:NetArray"
-     PILATUS_ROI_ARRAY_START_PV = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:NetArrayEraseStart"
-     PILATUS_ROI_ARRAY_NUSE_PV  = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:NetArray.NUSE"
-     PILATUS_ROI_ARRAY_ACQ_PV   = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:NetArray.ACQG"
+     PILATUS_STATS_PV             = PILATUS_PREFIX PILATUS_STATS_PREFIX "Net_RBV"
+     PILATUS_STATS_ARRAY_PV       = PILATUS_PREFIX PILATUS_STATS_PREFIX "NetArray"
+     PILATUS_STATS_ARRAY_START_PV = PILATUS_PREFIX PILATUS_STATS_PREFIX "NetArrayEraseStart"
+     PILATUS_STATS_ARRAY_NUSE_PV  = PILATUS_PREFIX PILATUS_STATS_PREFIX "NetArray.NUSE"
+     PILATUS_STATS_ARRAY_ACQ_PV   = PILATUS_PREFIX PILATUS_STATS_PREFIX "NetArray.ACQG"
+     PILATUS_STATS_BgdWidth_PV    = PILATUS_PREFIX PILATUS_STATS_PREFIX "BgdWidth"
      PILATUS_IMGPATH_PV         = PILATUS_PREFIX PILATUS_DET_PREFIX "FilePath"
      PILATUS_FNAME_PV           = PILATUS_PREFIX PILATUS_DET_PREFIX "FileName"
      PILATUS_FILENUMBER_PV      = PILATUS_PREFIX PILATUS_DET_PREFIX "FileNumber"
@@ -105,11 +113,10 @@ def _setup_img '{
      PILATUS_ABORT_PV           = PILATUS_PREFIX PILATUS_DET_PREFIX "Acquire"
      PILATUS_ACQMODE_PV         = PILATUS_PREFIX PILATUS_DET_PREFIX "TriggerMode"
      PILATUS_THRESHOLD_PV       = PILATUS_PREFIX PILATUS_DET_PREFIX "ThresholdEnergy"
-     PILATUS_ROI_0_MinX_PV      = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:MinX"
-     PILATUS_ROI_0_SizeX_PV     = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:SizeX"
-     PILATUS_ROI_0_MinY_PV      = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:MinY"
-     PILATUS_ROI_0_SizeY_PV     = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:SizeY"
-     PILATUS_ROI_0_BgdWidth_PV  = PILATUS_PREFIX PILATUS_ROI_PREFIX "0:BgdWidth"
+     PILATUS_ROI_MinX_PV        = PILATUS_PREFIX PILATUS_ROI_PREFIX "MinX"
+     PILATUS_ROI_SizeX_PV       = PILATUS_PREFIX PILATUS_ROI_PREFIX "SizeX"
+     PILATUS_ROI_MinY_PV        = PILATUS_PREFIX PILATUS_ROI_PREFIX "MinY"
+     PILATUS_ROI_SizeY_PV       = PILATUS_PREFIX PILATUS_ROI_PREFIX "SizeY"
 
      # Set Monitors. We tried this but it is not working. Results in a ca error PJE 1/22/08
      # epics_par(PILATUS_ARMED_PV,"monitor_set")
@@ -288,11 +295,11 @@ print PILATUS_Hw PILATUS_Vw
      print "minY  = " _minY
      print "sizeY = " _sizeY
 
-     epics_put(PILATUS_ROI_0_MinX_PV,_minX, 1)
-     epics_put(PILATUS_ROI_0_SizeX_PV,_sizeX, 1)
-     epics_put(PILATUS_ROI_0_MinY_PV,_minY, 1)
-     epics_put(PILATUS_ROI_0_SizeY_PV,_sizeY, 1)
-     epics_put(PILATUS_ROI_0_BgdWidth_PV,0, 1)
+     epics_put(PILATUS_ROI_MinX_PV,_minX, 1)
+     epics_put(PILATUS_ROI_SizeX_PV,_sizeX, 1)
+     epics_put(PILATUS_ROI_MinY_PV,_minY, 1)
+     epics_put(PILATUS_ROI_SizeY_PV,_sizeY, 1)
+     epics_put(PILATUS_STATS_BgdWidth_PV,0, 1)
 
 }'
 
