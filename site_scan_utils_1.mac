@@ -75,12 +75,26 @@ if( unset("BENCH_SHUTTER_DELAY") ) BENCH_SHUTTER_DELAY = 0.01
 
 def bench_shutter(set) '{ 
     if ( set == 1){
-          epics_put(BENCH_SHUTTER_PV, 1)
-	    epics_put(BENCH_SHUTTER_ATTEN_PV, 1)
+          if (SPEC == "psic_idc"){
+             epics_put(BENCH_SHUTTER_PV, 1)
+	       epics_put(BENCH_SHUTTER_ATTEN_PV, 1)
+          }
+          else if (SPEC == "psic_bmc") {
+             epics_put(BENCH_SHUTTER_PV, 0)
+	       epics_put(BENCH_SHUTTER_ATTEN_PV, 0)
+          }
+
     } else {
-         epics_put(BENCH_SHUTTER_PV, 0)
-         epics_put(BENCH_SHUTTER_ATTEN_PV, 0)
-         sleep(BENCH_SHUTTER_DELAY)
+         if (SPEC == "psic_idc"){
+             epics_put(BENCH_SHUTTER_PV, 0)
+             epics_put(BENCH_SHUTTER_ATTEN_PV, 0)
+             sleep(BENCH_SHUTTER_DELAY)
+         }
+         else if (SPEC == "psic_bmc") {
+             epics_put(BENCH_SHUTTER_PV, 1)
+             epics_put(BENCH_SHUTTER_ATTEN_PV, 1)
+             sleep(BENCH_SHUTTER_DELAY)
+         }
     }
  
 }'
@@ -420,6 +434,24 @@ def add_atten(set1, set2, set3, set4) '{
 }'
 ############################################################################
 
+############################################################################
+#############################################################################
+# 
+# check_atten
+#
+##############################################################################
+def check_atten '{
+  # check status of attenators
+  # note Low = 0 = "attenuator in" in the epics pv
+  # but were saying that if ATTEN[i] = 0 the atten is out
+  ATTEN[] = 0;
+  #Determine current attenuator positions
+   if( epics_get(ATT_STATUS_BIT_1) == "Low") ATTEN[0]=1;
+   if( epics_get(ATT_STATUS_BIT_2) == "Low") ATTEN[1]=1;
+   if( epics_get(ATT_STATUS_BIT_3) == "Low") ATTEN[2]=1;
+   if( epics_get(ATT_STATUS_BIT_4) == "Low") ATTEN[3]=1;
+}'
+############################################################################
 
 ############################################################################
 #############################################################################
