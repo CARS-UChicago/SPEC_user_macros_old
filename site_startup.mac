@@ -67,11 +67,12 @@ if (SPEC == "psic_idc"){
 
    ### Bench Shutter
    global BENCH_SHUTTER_PV
-       BENCH_SHUTTER_PV = ""
+       BENCH_SHUTTER_PV = "13BMC:Unidig1Bo12"
    global BENCH_SHUTTER_ATTEN_PV
-       BENCH_SHUTTER_ATTEN_PV = ""
+       BENCH_SHUTTER_ATTEN_PV = "13BMC:Unidig1Bo12"
    global USE_BENCH_SHUTTER
-   USE_BENCH_SHUTTER = FALSE
+   USE_BENCH_SHUTTER = TRUE
+   BENCH_SHUTTER_DELAY = 0.2
 
    ### Attenuators
    global ATT_STATUS_BIT_1
@@ -173,11 +174,56 @@ qdofile(t)
 t = USERMAC "/site_scan_utils_2.mac"
 qdofile(t)
 
+# rocking scan rod scan
 t = USERMAC "/rod_scan.mac"
 qdofile(t)
 
+# rodscan macros (one exposure per L-value, no rocking scans - 
+# see rod_scan.mac for rocking scan macro)
+t = USERMAC "/rodscan.mac"
+qdofile(t)
+
+# check_feedback for idc
+if(SPEC=="psic_idc"){
+  t = USERMAC "/check_feedback.mac"
+  qdofile(t)
+}
+
+# orientation matrix user front end
+t = USERMAC "/orient.mac"
+qdofile(t)
+
+# filter (attenuator) control from SPEC
+t = USERMAC "/filter.mac"
+qdofile(t)
 
 t = ""
+
+
+############################################################################
+# Global variable definitions which have to be done after loading macros
+############################################################################
+
+# make sure geometry motors are always saved to SPEC file for standard
+# SPEC scans
+_sav_geo_mot = 1
+
+if(SPEC == "psic_idc"){
+    # Attenuators (we call them filters, see filter.mac)
+	# the PVs listed here are the bench attenuators
+	# (keeps sample dose lower than using arm attenuators)
+    FILTER_PV_DEFAULT[0][] = "13IDC:Unidig2Bo14.VAL"
+    FILTER_PV_DEFAULT[1][] = "13IDC:Unidig2Bo15.VAL"
+    FILTER_PV_DEFAULT[2][] = "13IDC:Unidig2Bo16.VAL"
+    FILTER_PV_DEFAULT[3][] = "13IDC:Unidig2Bo17.VAL"
+} else if (SPEC == "psic_bmc"){
+
+   # Attenuators (we call them filters, see filter.mac)
+    FILTER_PV_DEFAULT[0][] = "13BMC:Unidig1Bo4.VAL"
+    FILTER_PV_DEFAULT[1][] = "13BMC:Unidig1Bo5.VAL"
+    FILTER_PV_DEFAULT[2][] = "13BMC:Unidig1Bo6.VAL"
+    FILTER_PV_DEFAULT[3][] = "13BMC:Unidig1Bo7.VAL"
+}
 
 ############################################################################
 # Define some convinient macros
