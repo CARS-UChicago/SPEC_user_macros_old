@@ -835,12 +835,12 @@ def traj_build '{
      # Wait for Pilatus to be armed before moving on. PJE 1/23/08
      while (epics_get(PILATUS_ARMED_PV) == "Unarmed") sleep(0.1)
 
-     # Set the number of points in Pilatus ROI MCA so it will stop
-     epics_put(PILATUS_ROI_ARRAY_NUSE_PV, $2)
-     # Start the Pilatus Roi MCA
-     epics_put(PILATUS_ROI_ARRAY_START_PV,1)
+     # Set the number of points in Pilatus STATS MCA so it will stop
+     epics_put(PILATUS_STATS_ARRAY_NUSE_PV, $2)
+     # Start the Pilatus STATS MCA
+     epics_put(PILATUS_STATS_ARRAY_START_PV,1)
      
-     while (epics_get(PILATUS_ROI_ARRAY_ACQ_PV) == "Done") sleep(0.1)
+     while (epics_get(PILATUS_STATS_ARRAY_ACQ_PV) == "Done") sleep(0.1)
    }
 }'
 
@@ -889,10 +889,10 @@ def traj_read_counts '{
     _pv = TRAJ_MCS_PREFIX "Acquiring"
     while (epics_get(_pv) != "Done") sleep(0.1)
 
-    # Wait for Pilatus ROI MCA to be done. 
+    # Wait for Pilatus STATS MCA to be done. 
     # Use this for img_on case 
     if (EPICS_COUNT == 4) {
-        while (epics_get(PILATUS_ROI_ARRAY_ACQ_PV) != "Done") sleep(0.1)
+        while (epics_get(PILATUS_STATS_ARRAY_ACQ_PV) != "Done") sleep(0.1)
      }
     
     # add this to wait for readback since we need to check the number of points
@@ -984,7 +984,7 @@ global TRAJ_INDEX
 global TRAJ_CLOCK_SCALE
 #TRAJ_IOC_PREFIX  is defined in site_startup  
 TRAJ_NAME           = TRAJ_IOC_PREFIX "traj1"
-TRAJ_MCS_PREFIX     = TRAJ_IOC_PREFIX "str:"
+TRAJ_MCS_PREFIX     = TRAJ_IOC_PREFIX "SIS1:"
 TRAJ_MOTOR_NAME[0]  = TRAJ_NAME "M1"
 TRAJ_MOTOR_NAME[1]  = TRAJ_NAME "M2"
 TRAJ_MOTOR_NAME[2]  = TRAJ_NAME "M3"
@@ -1001,7 +1001,7 @@ TRAJ_MCS_NAME[4]    = TRAJ_MCS_PREFIX "mca5"
 TRAJ_MCS_NAME[5]    = TRAJ_MCS_PREFIX "mca6"
 TRAJ_MCS_NAME[6]    = TRAJ_MCS_PREFIX "mca7"
 TRAJ_MCS_NAME[7]    = TRAJ_MCS_PREFIX "mca8"
-TRAJ_MCS_NAME[8]    = PILATUS_ROI_ARRAY_PV
+TRAJ_MCS_NAME[8]    = PILATUS_STATS_ARRAY_PV
 MAX_TRAJ_MOTORS     = 8
 MAX_TRAJ_INDEX      = 9
 MAX_TRAJ_MCS        = 8
