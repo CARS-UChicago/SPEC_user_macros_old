@@ -21,6 +21,7 @@
 #    Jan-2007     PJE changed def traj_init so that it takes a global for the scaler PV.
 #    Jun-15-2007  MLR commented out calcP_fromR for TRAJ_USE_ACTUAL = 0
 #    Nov-23-2007  SKG added new header in the data file for hklscan (del, eta, chi,phi,nu, mu)
+#    Jan-15-2009  PJE IDC upgrade to XPS.  Now we trigger the Pilatus the same way as BMC.
 # This file provides replacements for the following macros in the standard SPEC
 # macro file "standard.mac".
 #   _ascan
@@ -641,7 +642,23 @@ def _hklline '{
 def _scanabort '{
     _cleanup2
     _cleanup3
+    _pv = TRAJ_NAME "Abort";  epics_put(_pv, 1)
     comment "Trajectory scan aborted"
+       # Check to see if we are using the Pilatus.  If we are the
+       # Pilatus is expecting to be triggered and we need to 
+       # abort the Pilatus otherwise it will go into DMA timeout mode  - Bad!  PJE 12/12/07
+       if (EPICS_COUNT == 4){
+           print "  Abort Pilatus"
+           print "Aborting Pilatus waiting 40 sec for timeout."
+           epics_put(PILATUS_ABORT_PV,0)
+
+           # This sleep is a bit of a klug since we do not have any way
+           # telling when the pilatus is ready again.  I measured it a 33 sec
+           # so I am waiting 40 sec to be sure.
+
+           sleep(40)
+           print " Done waiting for the Pilatus hopfully it is ready."
+       }
     sync\
 }'
 
@@ -733,10 +750,13 @@ def traj_init '{
     for(j=0;j<MAX_TRAJ_MOTORS;j++) _traj_move[j]=0
     _pv = TRAJ_MCS_PREFIX "ChannelAdvance"
     epics_put(_pv, "External")
-
+    _pv = TRAJ_MCS_PREFIX "Prescale"
+    epics_put(_pv,1)
+    _pv = TRAJ_MCS_PREFIX "NuseAll"
+    epics_put(_pv,2048)
+    _pv = TRAJ_MCS_PREFIX "EnableClientWait"
+    epics_put(_pv,"Disable")
       
-
-
 }'
 
 
@@ -773,6 +793,11 @@ def traj_build '{
         exit
     }
 
+   # Trigger the MCS
+   _pv = TRAJ_MCS_PREFIX "EraseStart"
+   epics_put(_pv, 1)
+   sleep(0.1)
+
    #Setup the Pilatus
    if (EPICS_COUNT == 4){
      # Write to database fields
@@ -789,14 +814,21 @@ def traj_build '{
      # We use the Ext Enable mode on IDC together with the pulse generator
      # On BMC we use Multi Trigger mode - no need for pulse generator
      # When we upgrade IDC to XPS we will be able to use the same mode as BMC
-     if (SPEC == "psic_idc"){
-        epics_put(PILATUS_ACQMODE_PV,1,1)  # Ext Enable
-     }
-     else
-     {
-        epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Trigger
-        epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
-     }	  
+     
+     #if (SPEC == "psic_idc"){
+     #   epics_put(PILATUS_ACQMODE_PV,1,1)  # Ext Enable
+     # }
+     # else
+     # {
+     #   epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Trigger
+     #   epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
+     # }
+  
+     # We have now upgraded IDC to an XPS so now we use the same code as BMC
+     epics_put(PILATUS_ACQMODE_PV,3,1)  # Multi Trigger
+     epics_put(PILATUS_EXPSRTM_PV,_ctime-PILATUS_READOUT_TIME,1)  # Exposure time
+
+
 
      # hit the triggers
      epics_put(PILATUS_ACQ_PV,1)
@@ -824,6 +856,7 @@ def traj_exec '{
     if (USE_BENCH_SHUTTER == TRUE) bench_shutter(0)
 
     _pv = TRAJ_NAME "Execute"; epics_put(_pv, 1)
+    sleep(0.2)
     while (epics_get(_pv) == "Busy") sleep(0.1)
 
     # if using bench shutter close it after execution
@@ -834,22 +867,7 @@ def traj_exec '{
         _pv = TRAJ_NAME "ExecMessage"
         mess = epics_get(_pv)
         eprintf("Trajectory execution failed, error message = %s", mess)
-       
-       # Check to see if we are using the Pilatus.  If we are the
-       # Pilatus is expecting to be triggered and we need to 
-       # abort the Pilatus otherwise it will go into DMA timeout mode  - Bad!  PJE 12/12/07
-       if (EPICS_COUNT == 4){
-           print "  Abort Pilatus"
-           print "Aborting Pilatus waiting 40 sec for timeout."
-           epics_put(PILATUS_ABORT_PV,0)
-
-           # This sleep is a bit of a klug since we do not have any way
-           # telling when the pilatus is ready again.  I measured it a 33 sec
-           # so I am waiting 40 sec to be sure.
-
-           sleep(40)
-           print " Done waiting for the Pilatus hopfully it is ready."
-       }
+       _scanabort
        exit
     }
 
@@ -865,8 +883,9 @@ def traj_read_counts '{
         eprint "Usage: traj_read_counts ndets npts"
         exit
     }
-    # Wait for MCS to be done acquiring.  The SNL program turns the MCS off
-    # but it may not have finished reading hardware yet.
+    # Stop the MCS.
+    _pv = TRAJ_MCS_PREFIX "StopAll"
+    epics_put(_pv, 1)
     _pv = TRAJ_MCS_PREFIX "Acquiring"
     while (epics_get(_pv) != "Done") sleep(0.1)
 
