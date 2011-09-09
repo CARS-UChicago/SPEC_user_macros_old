@@ -24,16 +24,17 @@ def calc_mc '{
       # use: 
       if ($# < 4){
           print " calc_mc H K L L_B [dH dK] "
+          exit
       }
-	local azH, azK, azL, dHH, dKK, Hmc, Kmc, L, L_B
+	local azH, azK, azL, dHH, dKK, Hmc, Kmc, Lmc, L_B
 	if ($# == 6) {
-		L = $3
+		Lmc = $3
 		L_B = $4
 		dHH = $5
 		dKK = $6
-		Hmc = $1+(L-L_B)*dHH
-		Kmc = $2+(L-L_B)*dKK 
-		cal Hmc Kmc L 
+		Hmc = $1+(Lmc-L_B)*dHH
+		Kmc = $2+(Lmc-L_B)*dKK 
+		cal Hmc Kmc Lmc 
       }
 	if ($# == 4) { 
 		azH = G[3]
@@ -41,11 +42,11 @@ def calc_mc '{
 		azL = G[5]
 		dHH = azH/azL
 		dKK = azK/azL
-		L = $3
+		Lmc = $3
 		L_B = $4
-		Hmc = $1+(L-L_B)*dHH
-		Kmc = $2+(L-L_B)*dKK 
-		cal Hmc Kmc L 
+		Hmc = $1+(Lmc-L_B)*dHH
+		Kmc = $2+(Lmc-L_B)*dKK 
+		cal Hmc Kmc Lmc 
       }
 }' 
 
@@ -54,16 +55,17 @@ def br_mc '{
       # use: 
       if ($# < 4){
           print " br_mc H K L L_B [dH dK] "
+          exit
       }
-	local azH, azK, azL, dHH, dKK, Hmc, Kmc, L, L_B
+	local azH, azK, azL, dHH, dKK, Hmc, Kmc, Lmc, L_B
 	if ($# == 6) {
-		L = $3
+		Lmc = $3
 		L_B = $4
 		dHH = $5
 		dKK = $6
-		Hmc = $1+(L-L_B)*dHH
-		Kmc = $2+(L-L_B)*dKK 
-		ubr Hmc Kmc L 
+		Hmc = $1+(Lmc-L_B)*dHH
+		Kmc = $2+(Lmc-L_B)*dKK 
+		ubr Hmc Kmc Lmc 
       }
 	if ($# == 4) { 
 		azH = G[3]
@@ -71,11 +73,12 @@ def br_mc '{
 		azL = G[5]
 		dHH = azH/azL
 		dKK = azK/azL
-		L = $3
-		L_B = $4
-		Hmc = $1+(L-L_B)*dHH
-		Kmc = $2+(L-L_B)*dKK 
-		ubr Hmc Kmc L 
+		Lmc = $3
+            L_B = $4
+		Hmc = $1+(Lmc-L_B)*dHH
+		Kmc = $2+(Lmc-L_B)*dKK 
+            print "Hmc = " Hmc "  Kmc = " Kmc "  Lmc = " Lmc
+            ubr Hmc Kmc Lmc 
       }
 }' 
 
