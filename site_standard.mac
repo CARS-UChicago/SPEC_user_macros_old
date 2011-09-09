@@ -662,6 +662,8 @@ def Fout  'sprintf("%7.5g  %7.5g  ", ALPHA, BETA)'
 def _head '
 	user_prescan_head
 	_scan_time
+#PJE nov 14 2010: update the ATTEN global so that it is correct in the spec file
+     check_atten
 
       # see if this is a fake scan
       if (IS_FAKE_SCAN == 1){
