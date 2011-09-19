@@ -59,7 +59,7 @@ if (SPEC == "psic_idc"){
 
    ### Scalers Temp until traj auto count bug is fixed
    global SCALER_NAME     
-       SCALER_NAME        = "13IDC:scaler2"
+       SCALER_NAME        = "13IDC:scaler1"
 
 ## Here are the BMC globals
 } else if (SPEC == "psic_bmc") {
