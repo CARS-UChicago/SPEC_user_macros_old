@@ -108,16 +108,15 @@ def _ascan '{
     # Build trajectory. If all motors being scanned are real motors we optimize
     if (all_real) {
         for (i=0;i<_nm;i++) {
-            dp = (_f[i] - _s[i]) / MIN_TRAJ_ELEMENTS
             k = _traj_motor[i]
             _traj_move[k] = 1
-            for (j=0;j<MIN_TRAJ_ELEMENTS;j++) {
-                _traj_pos[k][j] = dp
-            }
+            _traj_pos[k][0] = _s[i]
+            _traj_pos[k][1] = _f[i]
         }
-        dt = _n1 * _ctime / MIN_TRAJ_ELEMENTS
-        for (j=0;j<MIN_TRAJ_ELEMENTS;j++) _traj_time[j] = dt
-        traj_build MIN_TRAJ_ELEMENTS _n1
+        dt = _n1 * _ctime
+        _traj_time[0] = dt
+        _traj_time[1] = dt
+        traj_build 2 _n1
     } else {
         # Define motors which will be moved
         for(i=0;i<MAX_TRAJ_INDEX;i++) {
@@ -128,34 +127,32 @@ def _ascan '{
         # Calculate the theoretical position of real motors first?
         for (i=0;i<_nm;i++) A[_m[i]] = _s[i]
         calcR_fromP
-        for (NPTS=0; NPTS < _n1; NPTS++) {
-            # Remember current position of all motors
-            _A0 = A
-            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS+1) * _d[i]
+        for (NPTS=0; NPTS < _n1+1; NPTS++) {
+            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS) * _d[i]
             calcR_fromP
             for (i=0;i<MAX_TRAJ_INDEX;i++) {
                 # Take the computed positions of the motor and define this 
                 # trajectory element
                 k = TRAJ_INDEX[i]
                 if (k < 0) continue
-                _traj_pos[k][NPTS] = A[i] - _A0[i]
+                _traj_pos[k][NPTS] = A[i]
             }
             _traj_time[NPTS] = _ctime
         }
-        traj_build _n1 _n1
+        traj_build _n1+1 _n1
     }
  
     # Execute trajectory
     traj_exec
 
     # Read counts
-    traj_read_counts COUNTERS _n1
+    traj_read_counts COUNTERS _n1+1
 
     # If TRAJ_USE_ACTUAL is true then read actual positions
-    if (TRAJ_USE_ACTUAL) traj_read_actual _n1
+    if (TRAJ_USE_ACTUAL) traj_read_actual _n1+1
 
     # Print, save and plot results
-    for (NPTS=0; NPTS < _n1; NPTS++) {
+    for (NPTS=0; NPTS < _n1+1; NPTS++) {
         if (TRAJ_USE_ACTUAL) {
             if (all_real) {
                 for (i=0;i<_nm;i++) 
@@ -174,7 +171,7 @@ def _ascan '{
             calcP_fromR
         } else {
             # Note the +1 is when the sync pulse occured
-            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS+1) * _d[i]
+            for (i=0;i<_nm;i++) A[_m[i]] = _s[i] + (NPTS) * _d[i]
             
 	    # MLR COMMENT THIS OUT ON JUNE 15, 2007.  Do not know who added it, but
 	    # it broke scanning pseudo motors, the motor positions were all the same
@@ -744,10 +741,14 @@ def traj_index(mi) '{
 def traj_init '{
     local j, _pv
 
-    # T2 added below to trn off scaler bf traj scan
     _pv = SCALER_NAME ".CONT"
     epics_put(_pv, 0)
 
+    _pv = TRAJ_NAME "GroupName"
+    epics_put(_pv, TRAJ_GROUP_NAME)
+    _pv = TRAJ_NAME "TrajectoryFile"
+    epics_put(_pv, TRAJ_FILE_NAME)
+    
     for(j=0;j<MAX_TRAJ_MOTORS;j++) _traj_move[j]=0
     _pv = TRAJ_MCS_PREFIX "ChannelAdvance"
     epics_put(_pv, "External")
@@ -775,7 +776,9 @@ def traj_build '{
     # Setup EPICS Trajectory Scan
     _pv = TRAJ_NAME "TimeMode";  epics_put(_pv, "Array")
     _pv = TRAJ_NAME "NumPoints"; epics_put(_pv, $1)
-    _pv = TRAJ_NAME "NumPulses"; epics_put(_pv, $2)
+    _pv = TRAJ_NAME "NumPulses"; epics_put(_pv, $2+1)
+    _pv = TRAJ_NAME "StartPulses"; epics_put(_pv, 1)
+    _pv = TRAJ_NAME "EndPulses";   epics_put(_pv, $1)
     for (i=0; i<MAX_TRAJ_MOTORS; i++) {
         _pv = TRAJ_MOTOR_NAME[i] "UseAxis"
         epics_put(_pv, _traj_move[i])
@@ -784,11 +787,11 @@ def traj_build '{
     }
     _pv = TRAJ_NAME "Times";     epics_put(_pv, _traj_time[0:$1])
     _pv = TRAJ_NAME "Build";     epics_put(_pv, 1)
-    while (epics_get(_pv) == "Busy") sleep(0.1)
+    while (epics_get(_pv) == "Build") sleep(0.1)
     _pv = TRAJ_NAME "BuildStatus";
     if (epics_get(_pv) != "Success") {
         _pv = TRAJ_NAME "BuildMessage"
-        mess = epics_get(_pv)
+        mess = epics_get(_pv, "string")
         eprintf("Trajectory build failed, error message = %s", mess)
         exit
     }
@@ -809,7 +812,7 @@ def traj_build '{
      
      # Setup exposure time, collection mode and number of frames
      epics_put(PILATUS_FILENUMBER_PV,0,1)
-     epics_put(PILATUS_NFRAME_PV, $2, 1)
+     epics_put(PILATUS_NFRAME_PV, $2+1, 1)
 
      # We use the Ext Enable mode on IDC together with the pulse generator
      # On BMC we use Multi Trigger mode - no need for pulse generator
@@ -836,7 +839,7 @@ def traj_build '{
      while (epics_get(PILATUS_ARMED_PV) == "Unarmed") sleep(0.1)
 
      # Set the number of points in Pilatus STATS MCA so it will stop
-     epics_put(PILATUS_STATS_ARRAY_NUSE_PV, $2)
+     epics_put(PILATUS_STATS_ARRAY_NUSE_PV, $2+1)
      # Start the Pilatus STATS MCA
      epics_put(PILATUS_STATS_ARRAY_START_PV,1)
      
@@ -857,14 +860,14 @@ def traj_exec '{
 
     _pv = TRAJ_NAME "Execute"; epics_put(_pv, 1)
     sleep(0.2)
-    while (epics_get(_pv) == "Busy") sleep(0.1)
+    while (epics_get(_pv) == "Execute") sleep(0.1)
 
     # if using bench shutter close it after execution
     if (USE_BENCH_SHUTTER == TRUE) bench_shutter(1)
 
-    _pv = TRAJ_NAME "ExecStatus";
+    _pv = TRAJ_NAME "ExecuteStatus";
     if (epics_get(_pv) != "Success") {
-        _pv = TRAJ_NAME "ExecMessage"
+        _pv = TRAJ_NAME "ExecuteMessage"
         mess = epics_get(_pv)
         eprintf("Trajectory execution failed, error message = %s", mess)
        _scanabort
@@ -900,7 +903,7 @@ def traj_read_counts '{
     #while (epics_get(_pv) == "Busy") sleep(0.1)
 
     _ndets=$1; 
-    _npts=$2
+    _npts=$2+1
 
 
     # PJE 6/5/07
@@ -936,10 +939,10 @@ def traj_read_actual '{
     }
 
     _pv = TRAJ_NAME "Readback"; epics_put(_pv, 1)
-    while (epics_get(_pv) == "Busy") sleep(0.1)
-    _pv = TRAJ_NAME "ReadStatus";
+    while (epics_get(_pv) == "Readback") sleep(0.1)
+    _pv = TRAJ_NAME "ReadbackStatus";
     if (epics_get(_pv) != "Success") {
-        _pv = TRAJ_NAME "ReadMessage"
+        _pv = TRAJ_NAME "ReadbackMessage"
         mess = epics_get(_pv)
         eprintf("Trajectory read failed, error message = %s", mess)
         exit
@@ -952,7 +955,7 @@ def traj_read_actual '{
 
     # _npts=$1
 
-    _pv = TRAJ_NAME "Nactual"
+    _pv = TRAJ_NAME "NumActualPulses"
     _npts = epics_get(_pv)
 
     if (_npts != $1 ){
@@ -961,7 +964,7 @@ def traj_read_actual '{
     }
 
     for (i=0; i<MAX_TRAJ_MOTORS; i++) {
-        _pv = TRAJ_MOTOR_NAME[i] "Actual"
+        _pv = TRAJ_MOTOR_NAME[i] "Readbacks"
         _traj_actual[i][0:_npts-1] = epics_get(_pv)
     }
 }'
@@ -972,7 +975,9 @@ def traj_read_actual '{
 global TRAJ_IOC_PREFIX
 global TRAJ_NAME
 global TRAJ_MCS_PREFIX
+global TRAJ_GROUP_NAME
 global TRAJ_MOTOR_NAME
+global TRAJ_FILE_NAME
 global MAX_TRAJ_MOTORS
 global MAX_TRAJ_INDEX
 global MAX_TRAJ_MCS
@@ -985,6 +990,7 @@ global TRAJ_CLOCK_SCALE
 #TRAJ_IOC_PREFIX  is defined in site_startup  
 TRAJ_NAME           = TRAJ_IOC_PREFIX "Prof1:"
 TRAJ_MCS_PREFIX     = TRAJ_IOC_PREFIX "SIS1:"
+TRAJ_GROUP_NAME     = "GROUP1"
 TRAJ_MOTOR_NAME[0]  = TRAJ_NAME "M1"
 TRAJ_MOTOR_NAME[1]  = TRAJ_NAME "M2"
 TRAJ_MOTOR_NAME[2]  = TRAJ_NAME "M3"
@@ -993,6 +999,7 @@ TRAJ_MOTOR_NAME[4]  = TRAJ_NAME "M5"
 TRAJ_MOTOR_NAME[5]  = TRAJ_NAME "M6"
 TRAJ_MOTOR_NAME[6]  = TRAJ_NAME "M7"
 TRAJ_MOTOR_NAME[7]  = TRAJ_NAME "M8"
+TRAJ_FILE_NAME      = "Trajectory.trj"
 TRAJ_MCS_NAME[0]    = TRAJ_MCS_PREFIX "mca1"
 TRAJ_MCS_NAME[1]    = TRAJ_MCS_PREFIX "mca2"
 TRAJ_MCS_NAME[2]    = TRAJ_MCS_PREFIX "mca3"
